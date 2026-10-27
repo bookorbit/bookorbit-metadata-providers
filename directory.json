@@ -2,6 +2,21 @@
   "version": 1,
   "providers": [
     {
+      "key": "audiosilo",
+      "name": "AudioSilo",
+      "summary": "Audiobook metadata from AudioSilo Meta's community catalogue: descriptions, narrators, runtimes, identifiers, genres and series.",
+      "image": "ghcr.io/bookorbit/audiosilo-provider",
+      "version": "0.1.0",
+      "port": 8080,
+      "docsUrl": "https://github.com/bookorbit/bookorbit-metadata-providers/tree/main/providers/audiosilo",
+      "homepage": "https://meta.audiosilo.app",
+      "color": "#d46a45",
+      "mediaTypes": [
+        "audiobook"
+      ],
+      "languages": []
+    },
+    {
       "key": "douban",
       "name": "Douban",
       "summary": "Chinese books from Douban: titles, authors, publishers, ratings and ISBN lookups. Covers are not available.",

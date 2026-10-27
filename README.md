@@ -10,6 +10,7 @@ release.
 
 | Provider | What it covers | Image |
 |---|---|---|
+| [AudioSilo](providers/audiosilo) | Audiobook metadata from the [AudioSilo Meta](https://meta.audiosilo.app) community catalogue | `ghcr.io/bookorbit/audiosilo-provider` |
 | [Douban](providers/douban) | Chinese books from [book.douban.com](https://book.douban.com): titles, authors, publishers, ratings, ISBN lookups. No covers, which Douban serves only to its own pages | `ghcr.io/bookorbit/douban-provider` |
 | [FantLab](providers/fantlab) | Russian-language science fiction and fantasy from [fantlab.ru](https://fantlab.ru): works, editions by ISBN, series, genres, ratings | `ghcr.io/bookorbit/fantlab-provider` |
 | [J-Novel Club](providers/jnovelclub) | Light novels and manga published in English by [J-Novel Club](https://j-novel.club), with the volume number taken from the file's title | `ghcr.io/bookorbit/jnovelclub-provider` |
