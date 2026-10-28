@@ -17,6 +17,7 @@ release.
 | [LubimyCzytac](providers/lubimyczytac) | Polish books from [lubimyczytac.pl](https://lubimyczytac.pl): titles, authors, series, genres | `ghcr.io/bookorbit/lubimyczytac-provider` |
 | [MangaBaka](providers/mangabaka) | Manga, manhwa, manhua and light novels from [mangabaka.org](https://mangabaka.org), with the volume number taken from the file's title | `ghcr.io/bookorbit/mangabaka-provider` |
 | [Romance.io](providers/romanceio) | Romance books from [Romance.io](https://www.romance.io): community topics, ratings and steam/spice levels | `ghcr.io/bookorbit/romanceio-provider` |
+| [Soundbooth Theater](providers/soundbooththeater) | English audiobooks from Soundbooth Theater: narrators, series, descriptions and runtimes | `ghcr.io/bookorbit/soundbooththeater-provider` |
 | [Yandex Books](providers/yandexbooks) | Russian books, audiobooks and comics from [Yandex Books](https://books.yandex.ru): descriptions, publishers, series, genres, narrators and running times. No ISBNs, which the site does not show | `ghcr.io/bookorbit/yandexbooks-provider` |
 
 LubimyCzytac used to be built into BookOrbit. It keeps its old key, so the ids already on your books
