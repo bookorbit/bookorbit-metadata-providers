@@ -444,6 +444,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn maps_a_real_audiosilo_work_response() {
+        let work: WorkDetail = serde_json::from_str(include_str!(
+            "../testdata/a-killer-coffee-mystery-box-set.json"
+        ))
+        .unwrap();
+        let mapped = map_work(&work, None, None);
+
+        assert_eq!(
+            mapped.provider_id,
+            "a-killer-coffee-mystery-box-set-books-1-3"
+        );
+        assert_eq!(mapped.authors, ["Tonya Kappes"]);
+        assert_eq!(mapped.narrators, ["Ariel Hicks", "Madeline Mrozek"]);
+        assert_eq!(mapped.duration, 51_360);
+        assert_eq!(mapped.published_year, "2023");
+        assert_eq!(mapped.publisher, "Tonya Kappes Books");
+        assert_eq!(
+            mapped.genres,
+            [
+                "Cozy Mystery",
+                "Food Cooking",
+                "Mystery",
+                "Nature",
+                "Short Stories"
+            ]
+        );
+        assert_eq!(mapped.series[0].sequence, "1-3");
+        assert_eq!(
+            mapped.cover,
+            "https://m.media-amazon.com/images/I/81TI3RvP2NL.jpg"
+        );
+    }
+
+    #[test]
     fn maps_work_metadata_and_attributes_community_description() {
         let work: WorkDetail = serde_json::from_value(serde_json::json!({
             "id": "the-example-book",

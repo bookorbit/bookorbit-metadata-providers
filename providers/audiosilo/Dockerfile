@@ -3,6 +3,7 @@ RUN apk add --no-cache musl-dev
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY testdata ./testdata
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,id=audiosilo-target,sharing=locked \
     cargo build --release --locked && cp target/release/audiosilo-provider /audiosilo-provider

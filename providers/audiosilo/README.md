@@ -20,6 +20,7 @@ providers**. To build it yourself, run `docker build -t audiosilo-provider .` fr
 |---|---|---|
 | `PORT` | `8080` | Provider listen port |
 | `AUDIOSILO_API` | `https://meta.audiosilo.app` | AudioSilo API origin, useful for a compatible deployment or local test server |
+| `AUTH_TOKEN` | unset | When set, `/search` and `/book/{id}` require this exact `Authorization` header |
 
 ## Metadata
 
@@ -35,5 +36,9 @@ human-readable labels, and series positions pass through as strings. If a work h
 description, the response appends `(Description CC BY-SA 4.0, AudioSilo Meta community)` as required
 for attribution; otherwise it uses the public-domain core description.
 
-AudioSilo's API is public and read-only; this provider needs no credentials. It does not store a
-local catalogue or cache metadata.
+The provider sends title searches and exact ISBN lookups to AudioSilo. It uses BookOrbit's author
+only to rank returned candidates locally; it does not send the author or any other library or user
+data upstream. AudioSilo's API is public and read-only, so no upstream credentials are needed. Set
+`AUTH_TOKEN` if this provider is reachable beyond a private network, and enter the same value in
+BookOrbit's Authorization header field. The provider does not store a local catalogue or cache
+metadata.
