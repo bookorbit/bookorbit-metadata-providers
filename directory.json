@@ -36,6 +36,23 @@
       ]
     },
     {
+      "key": "graphicaudio",
+      "name": "Graphic Audio",
+      "summary": "Audiobook productions from Graphic Audio: full casts, descriptions, series, release years and ISBNs.",
+      "image": "ghcr.io/bookorbit/graphicaudio-provider",
+      "version": "0.1.0",
+      "port": 8080,
+      "docsUrl": "https://github.com/bookorbit/bookorbit-metadata-providers/tree/main/providers/graphicaudio",
+      "homepage": "https://www.graphicaudiointernational.net",
+      "color": "#c8102e",
+      "mediaTypes": [
+        "audiobook"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
       "key": "jnovelclub",
       "name": "J-Novel Club",
       "summary": "Light novels and manga published in English by J-Novel Club. Reads the volume number from the book's title.",
