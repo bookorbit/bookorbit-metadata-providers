@@ -1,11 +1,16 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::{header::RETRY_AFTER, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 pub const DEFAULT_API: &str = "https://meta.audiosilo.app";
 const MAX_LIMIT: usize = 10;
+/// AudioSilo publishes no limit, but a search reads every hit's detail; this keeps one search, and
+/// every caller's together, from landing on it all at once.
+const MAX_IN_FLIGHT: usize = 4;
 
 #[derive(Debug)]
 pub enum UpstreamError {
@@ -18,6 +23,7 @@ pub enum UpstreamError {
 pub struct AudioSilo {
     base: String,
     http: reqwest::Client,
+    slots: Arc<Semaphore>,
 }
 
 impl AudioSilo {
@@ -30,21 +36,20 @@ impl AudioSilo {
         Self {
             base: base.trim_end_matches('/').to_string(),
             http,
+            slots: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
         }
     }
 
+    // Every record is an audiobook whatever `mediaType` asks for: BookOrbit asks with `book` for a
+    // book that has both an ebook and audio, and ranks the records by medium itself.
     pub async fn search(&self, query: &Query) -> Result<SearchAnswer, UpstreamError> {
-        if !query.media_type.is_empty() && query.media_type != "audiobook" {
-            return Ok(SearchAnswer::default());
-        }
-
         if !query.isbn.is_empty() {
             let Some(found) = self.lookup_isbn(&query.isbn).await? else {
                 return Ok(SearchAnswer::default());
             };
             let work = self.work(&found.work.id).await?;
             return Ok(SearchAnswer {
-                matches: vec![map_work(&work, None, Some(&found.recording_id))],
+                matches: vec![map_work(&work, Some(&found.recording_id))],
                 partial: false,
             });
         }
@@ -71,20 +76,17 @@ impl AudioSilo {
         let mut tasks = JoinSet::new();
         for (index, hit) in hits.into_iter().enumerate() {
             let source = self.clone();
-            tasks.spawn(async move {
-                let result = source.work(&hit.id).await;
-                (index, hit, result)
-            });
+            tasks.spawn(async move { (index, source.work(&hit.id).await) });
         }
 
-        let mut found: Vec<Option<(WorkCard, WorkDetail)>> = (0..hit_count).map(|_| None).collect();
+        let mut found: Vec<Option<WorkDetail>> = (0..hit_count).map(|_| None).collect();
         let mut partial = false;
         let mut failure = None;
         while let Some(joined) = tasks.join_next().await {
             match joined {
-                Ok((index, hit, Ok(work))) => found[index] = Some((hit, work)),
-                Ok((_, _, Err(UpstreamError::NotFound))) => partial = true,
-                Ok((_, _, Err(error))) => {
+                Ok((index, Ok(work))) => found[index] = Some(work),
+                Ok((_, Err(UpstreamError::NotFound))) => partial = true,
+                Ok((_, Err(error))) => {
                     partial = true;
                     failure.get_or_insert(error);
                 }
@@ -95,23 +97,20 @@ impl AudioSilo {
             }
         }
 
-        let found: Vec<(WorkCard, WorkDetail)> = found.into_iter().flatten().collect();
+        let found: Vec<WorkDetail> = found.into_iter().flatten().collect();
         if found.is_empty() && partial {
             return Err(failure
                 .unwrap_or_else(|| UpstreamError::Failed("no work details could be read".into())));
         }
         Ok(SearchAnswer {
-            matches: found
-                .into_iter()
-                .map(|(hit, work)| map_work(&work, Some(&hit.narrators), None))
-                .collect(),
+            matches: found.iter().map(|work| map_work(work, None)).collect(),
             partial,
         })
     }
 
     pub async fn lookup(&self, id: &str) -> Result<Option<BookMetadata>, UpstreamError> {
         match self.work(id).await {
-            Ok(work) => Ok(Some(map_work(&work, None, None))),
+            Ok(work) => Ok(Some(map_work(&work, None))),
             Err(UpstreamError::NotFound) => Ok(None),
             Err(error) => Err(error),
         }
@@ -149,6 +148,11 @@ impl AudioSilo {
     }
 
     async fn get_json<T: DeserializeOwned>(&self, url: Url) -> Result<T, UpstreamError> {
+        let _slot = self
+            .slots
+            .acquire()
+            .await
+            .map_err(|error| UpstreamError::Failed(error.to_string()))?;
         let response = self
             .http
             .get(url)
@@ -187,7 +191,6 @@ pub struct Query {
     pub title: String,
     pub author: String,
     pub isbn: String,
-    pub media_type: String,
     pub limit: usize,
 }
 
@@ -220,10 +223,6 @@ pub struct BookMetadata {
     pub cover: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub isbn: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub isbn13: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub isbn10: String,
     #[serde(skip_serializing_if = "is_zero")]
     pub duration: u32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -260,8 +259,6 @@ struct WorkCard {
     id: String,
     #[serde(default)]
     authors: Vec<PersonRef>,
-    #[serde(default)]
-    narrators: Vec<PersonRef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,7 +268,7 @@ struct LookupResult {
     recording_id: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct PersonRef {
     name: String,
@@ -282,12 +279,6 @@ struct PersonRef {
 struct SeriesRef {
     name: String,
     position: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct WorkXref {
-    isbn: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -316,43 +307,22 @@ struct WorkDetail {
     subtitle: String,
     authors: Vec<PersonRef>,
     language: String,
-    first_published: String,
     description: String,
     genres: Vec<String>,
     series: Vec<SeriesRef>,
-    xref: Option<WorkXref>,
-    cover_url: Option<String>,
     recordings: Option<Vec<Recording>>,
     community_description: Option<CommunityDescription>,
 }
 
-fn map_work(
-    work: &WorkDetail,
-    search_narrators: Option<&[PersonRef]>,
-    recording_id: Option<&str>,
-) -> BookMetadata {
+/// The record is one recording of the work: the one an ISBN named, else the first. Its narrators,
+/// publisher, year, runtime, ISBN and cover all come from that recording, so they describe the same
+/// audiobook. The work's first publication and its cross-referenced ISBNs belong to the print book,
+/// so a work with no recording has neither.
+fn map_work(work: &WorkDetail, recording_id: Option<&str>) -> BookMetadata {
     let recordings = work.recordings.as_deref().unwrap_or_default();
-    let first = recording_id
+    let recording = recording_id
         .and_then(|id| recordings.iter().find(|recording| recording.id == id))
         .or(recordings.first());
-    let recording_narrators: Vec<PersonRef> = recordings
-        .iter()
-        .flat_map(|recording| recording.narrators.iter().cloned())
-        .collect();
-    let narrator_names = unique_names(if recording_narrators.is_empty() {
-        search_narrators.unwrap_or_default()
-    } else {
-        &recording_narrators
-    });
-    let isbn = first
-        .and_then(|recording| recording.isbn.first())
-        .or_else(|| work.xref.as_ref().and_then(|xref| xref.isbn.first()))
-        .cloned()
-        .unwrap_or_default();
-    let release_date = first
-        .map(|recording| recording.release_date.as_str())
-        .filter(|date| !date.is_empty())
-        .unwrap_or(&work.first_published);
     let description = match &work.community_description {
         Some(community) if !community.text.is_empty() => format!(
             "{}\n\n(Description CC BY-SA 4.0, AudioSilo Meta community)",
@@ -367,29 +337,24 @@ fn map_work(
         title: work.title.clone(),
         subtitle: work.subtitle.clone(),
         authors: unique_names(&work.authors),
-        narrators: narrator_names,
-        publisher: first
+        narrators: recording
+            .map(|recording| unique_names(&recording.narrators))
+            .unwrap_or_default(),
+        publisher: recording
             .map(|recording| recording.publisher.clone())
             .unwrap_or_default(),
-        published_year: year(release_date),
-        description,
-        cover: first
-            .map(|recording| recording.cover_url.clone())
-            .filter(|cover| !cover.is_empty())
-            .or_else(|| work.cover_url.clone())
+        published_year: recording
+            .map(|recording| year(&recording.release_date))
             .unwrap_or_default(),
-        isbn: isbn.clone(),
-        isbn13: if isbn.len() == 13 {
-            isbn.clone()
-        } else {
-            String::new()
-        },
-        isbn10: if isbn.len() == 10 {
-            isbn
-        } else {
-            String::new()
-        },
-        duration: first
+        description,
+        cover: recording
+            .map(|recording| recording.cover_url.clone())
+            .unwrap_or_default(),
+        isbn: recording
+            .and_then(|recording| recording.isbn.first())
+            .cloned()
+            .unwrap_or_default(),
+        duration: recording
             .and_then(|recording| recording.runtime_min)
             .unwrap_or_default()
             .saturating_mul(60),
@@ -449,7 +414,7 @@ mod tests {
             "../testdata/a-killer-coffee-mystery-box-set.json"
         ))
         .unwrap();
-        let mapped = map_work(&work, None, None);
+        let mapped = map_work(&work, None);
 
         assert_eq!(
             mapped.provider_id,
@@ -478,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_work_metadata_and_attributes_community_description() {
+    fn maps_the_named_recording_and_attributes_community_description() {
         let work: WorkDetail = serde_json::from_value(serde_json::json!({
             "id": "the-example-book",
             "title": "The Example Book",
@@ -489,8 +454,7 @@ mod tests {
             "description": "Public-domain description",
             "genres": ["hard-science-fiction"],
             "series": [{"id": "example-series", "name": "Example Series", "position": "2.5"}],
-            "xref": {"isbn": ["9781234567890"]},
-            "cover_url": "https://example.test/work-cover.jpg",
+            "xref": {"isbn": ["9780000000002"]},
             "community_description": {"text": "A community description.", "license": "CC-BY-SA-4.0"},
             "recordings": [{
                 "id": "other-recording",
@@ -514,14 +478,15 @@ mod tests {
             }]
         })).unwrap();
 
-        let mapped = map_work(&work, None, Some("reader-one"));
+        let mapped = map_work(&work, Some("reader-one"));
         assert_eq!(mapped.provider_id, "the-example-book");
         assert_eq!(mapped.media_type, "audiobook");
         assert_eq!(mapped.authors, ["A. Writer"]);
-        assert_eq!(mapped.narrators, ["Other Reader", "N. Reader"]);
+        assert_eq!(mapped.narrators, ["N. Reader"]);
+        assert_eq!(mapped.publisher, "Example Audio");
         assert_eq!(mapped.duration, 19_260);
         assert_eq!(mapped.published_year, "2024");
-        assert_eq!(mapped.isbn13, "9781234567890");
+        assert_eq!(mapped.isbn, "9781234567890");
         assert_eq!(mapped.cover, "https://example.test/audio-cover.jpg");
         assert_eq!(mapped.genres, ["Hard Science Fiction"]);
         assert_eq!(mapped.series[0].sequence, "2.5");
@@ -531,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_recordless_work_and_uses_core_description() {
+    fn maps_recordless_work_without_the_print_book_details() {
         let work: WorkDetail = serde_json::from_value(serde_json::json!({
             "id": "not-yet-recorded",
             "title": "Not Yet Recorded",
@@ -539,13 +504,16 @@ mod tests {
             "language": "en",
             "first_published": "1999-01-01",
             "description": "Core description",
+            "xref": {"isbn": ["9780000000002"]},
             "recordings": null
         }))
         .unwrap();
 
-        let mapped = map_work(&work, None, None);
-        assert_eq!(mapped.published_year, "1999");
+        let mapped = map_work(&work, None);
         assert_eq!(mapped.description, "Core description");
+        assert_eq!(mapped.published_year, "");
+        assert_eq!(mapped.isbn, "");
+        assert!(mapped.narrators.is_empty());
         assert_eq!(mapped.duration, 0);
     }
 }

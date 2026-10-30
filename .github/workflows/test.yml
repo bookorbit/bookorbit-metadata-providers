@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dir: [providers/audiosilo, providers/douban, providers/fantlab, providers/jnovelclub, providers/libris, providers/lubimyczytac, providers/mangabaka, providers/romanceio, providers/yandexbooks, starters/rust]
+        dir: [providers/douban, providers/fantlab, providers/jnovelclub, providers/libris, providers/lubimyczytac, providers/mangabaka, providers/romanceio, providers/yandexbooks, starters/rust]
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

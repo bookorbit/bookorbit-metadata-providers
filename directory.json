@@ -10,7 +10,7 @@
       "port": 8080,
       "docsUrl": "https://github.com/bookorbit/bookorbit-metadata-providers/tree/main/providers/audiosilo",
       "homepage": "https://meta.audiosilo.app",
-      "color": "#d46a45",
+      "color": "#db2777",
       "mediaTypes": [
         "audiobook"
       ],

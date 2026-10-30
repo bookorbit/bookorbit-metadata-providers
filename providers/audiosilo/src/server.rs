@@ -35,7 +35,7 @@ async fn info(State(state): State<AppState>) -> Json<serde_json::Value> {
         "name": "AudioSilo",
         "version": VERSION,
         "avatarUrl": "https://meta.audiosilo.app/apple-touch-icon.png",
-        "color": "#d46a45",
+        "color": "#db2777",
         "authenticationRequired": state.auth_token.is_some(),
         "key": "audiosilo",
         "mediaTypes": ["audiobook"],
@@ -68,7 +68,6 @@ async fn search(
         title: param("query").to_string(),
         author: param("author").to_string(),
         isbn: param("isbn").to_string(),
-        media_type: param("mediaType").to_string(),
         limit: param("limit")
             .parse::<usize>()
             .map_or(DEFAULT_LIMIT, |limit| limit.clamp(1, MAX_LIMIT)),

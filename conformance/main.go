@@ -199,8 +199,7 @@ func rasterImage(b []byte) bool {
 }
 
 func checkSearch(r *report, get getter, query string, info map[string]any) []string {
-	mediaType := searchMediaType(info)
-	status, body, took, err := get("search?query=" + url.QueryEscape(query) + "&mediaType=" + url.QueryEscape(mediaType))
+	status, body, took, err := get("search?query=" + url.QueryEscape(query) + "&mediaType=book")
 	object := decodeObject(r, "search", status, body, err)
 	if object == nil {
 		return nil
@@ -239,21 +238,6 @@ func checkSearch(r *report, get getter, query string, info map[string]any) []str
 		r.warn("search without a query answered %d; the spec asks for 400", status)
 	}
 	return ids
-}
-
-func searchMediaType(info map[string]any) string {
-	mediaTypes, ok := info["mediaTypes"].([]any)
-	if !ok {
-		return "book"
-	}
-	for _, candidate := range []string{"book", "audiobook", "comic"} {
-		for _, mediaType := range mediaTypes {
-			if mediaType == candidate {
-				return candidate
-			}
-		}
-	}
-	return "book"
 }
 
 func checkRecord(r *report, name string, record map[string]any) {
