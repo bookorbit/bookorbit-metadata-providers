@@ -17,6 +17,26 @@
       "languages": []
     },
     {
+      "key": "databazeknih",
+      "name": "Databáze knih",
+      "summary": "Czech and Slovak books, audiobooks and Czech translations from Databáze knih: descriptions, covers, series, genres, ratings, ISBN lookups, narrators and running times.",
+      "image": "ghcr.io/fhavrlent/databazeknih-provider",
+      "version": "0.1.3",
+      "port": 8080,
+      "docsUrl": "https://github.com/fhavrlent/databazeknih-provider",
+      "homepage": "https://www.databazeknih.cz",
+      "color": "#a03a3b",
+      "mediaTypes": [
+        "book",
+        "audiobook",
+        "comic"
+      ],
+      "languages": [
+        "cs",
+        "sk"
+      ]
+    },
+    {
       "key": "douban",
       "name": "Douban",
       "summary": "Chinese books from Douban: titles, authors, publishers, ratings and ISBN lookups. Covers are not available.",
