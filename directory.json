@@ -122,6 +122,24 @@
       "languages": []
     },
     {
+      "key": "moly",
+      "name": "Moly",
+      "summary": "Hungarian books and audiobooks from moly.hu: descriptions, series, editions with ISBNs and covers, narrators, tags and ratings.",
+      "image": "ghcr.io/flyinpancake/bookorbit-moly-provider",
+      "version": "0.0.3",
+      "port": 8080,
+      "docsUrl": "https://github.com/FlyinPancake/bookorbit-moly-provider",
+      "homepage": "https://moly.hu",
+      "color": "#b7cfe7",
+      "mediaTypes": [
+        "book",
+        "audiobook"
+      ],
+      "languages": [
+        "hu"
+      ]
+    },
+    {
       "key": "romanceio",
       "name": "Romance.io",
       "summary": "Romance books from Romance.io: community topics, ratings and steam/spice levels.",
