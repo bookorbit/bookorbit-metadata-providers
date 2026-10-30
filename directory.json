@@ -21,7 +21,7 @@
       "name": "Databáze knih",
       "summary": "Czech and Slovak books, audiobooks and Czech translations from Databáze knih: descriptions, covers, series, genres, ratings, ISBN lookups, narrators and running times.",
       "image": "ghcr.io/fhavrlent/databazeknih-provider",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "port": 8080,
       "docsUrl": "https://github.com/fhavrlent/databazeknih-provider",
       "homepage": "https://www.databazeknih.cz",
