@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -5,7 +6,6 @@ use regex::Regex;
 use reqwest::Url;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::soundbooth::SITE;
 
@@ -14,9 +14,9 @@ static PRODUCT_LINK: LazyLock<Selector> =
     LazyLock::new(|| selector("a.woocommerce-LoopProduct-link"));
 static PRODUCT_TITLE: LazyLock<Selector> =
     LazyLock::new(|| selector(".woocommerce-loop-product__title"));
-static PRODUCT_IMAGE: LazyLock<Selector> =
-    LazyLock::new(|| selector("img.attachment-woocommerce_thumbnail"));
 static DETAIL_TITLE: LazyLock<Selector> = LazyLock::new(|| selector("h1.product_title"));
+static GALLERY_IMAGE: LazyLock<Selector> =
+    LazyLock::new(|| selector(".woocommerce-product-gallery__image img"));
 static SYNOPSIS: LazyLock<Selector> = LazyLock::new(|| selector(".synopsis.readmore"));
 static DESCRIPTION_TAB: LazyLock<Selector> = LazyLock::new(|| selector("#tab-description"));
 static SHORT_DESCRIPTION: LazyLock<Selector> =
@@ -26,12 +26,9 @@ static AUTHOR_LINKS: LazyLock<Selector> = LazyLock::new(|| selector(".summary h3
 static AUDIOBOOK_ITEMS: LazyLock<Selector> = LazyLock::new(|| selector("ul.audiobook-meta li"));
 static LABEL: LazyLock<Selector> = LazyLock::new(|| selector("span"));
 static LINKS: LazyLock<Selector> = LazyLock::new(|| selector("a"));
-static POSTED_GENRES: LazyLock<Selector> = LazyLock::new(|| selector(".posted_in a"));
-static JSON_LD: LazyLock<Selector> = LazyLock::new(|| selector("script.yoast-schema-graph"));
 static OG_DESCRIPTION: LazyLock<Selector> =
     LazyLock::new(|| selector("meta[property='og:description']"));
 static OG_TITLE: LazyLock<Selector> = LazyLock::new(|| selector("meta[property='og:title']"));
-static OG_IMAGE: LazyLock<Selector> = LazyLock::new(|| selector("meta[property='og:image']"));
 static TITLE_SERIES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(.*?),\s*(?:book|episode)\s+([0-9]+(?:\.[0-9]+)?)(?::\s*(.*))?$")
         .expect("valid series-title pattern")
@@ -43,6 +40,9 @@ static DURATION_PART: LazyLock<Regex> = LazyLock::new(|| {
 static PRODUCT_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9-]{0,127}$").expect("valid product id pattern"));
 
+/// Words that say nothing about which book a title names.
+const FILLER_WORDS: [&str; 7] = ["a", "an", "and", "the", "of", "book", "episode"];
+
 fn selector(pattern: &str) -> Selector {
     Selector::parse(pattern).expect("valid CSS selector")
 }
@@ -52,26 +52,6 @@ pub struct ProductHit {
     pub provider_id: String,
     pub url: String,
     pub title: String,
-    pub subtitle: String,
-    pub cover: String,
-    pub cover_width: u32,
-    pub cover_height: u32,
-    pub series: Vec<Series>,
-}
-
-impl ProductHit {
-    pub fn lookup(id: &str, url: &str) -> Self {
-        Self {
-            provider_id: id.to_string(),
-            url: url.to_string(),
-            title: String::new(),
-            subtitle: String::new(),
-            cover: String::new(),
-            cover_width: 0,
-            cover_height: 0,
-            series: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -80,8 +60,6 @@ pub struct BookMetadata {
     pub media_type: String,
     pub provider_id: String,
     pub title: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub subtitle: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub authors: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -124,85 +102,118 @@ pub fn valid_product_id(raw: &str) -> bool {
     PRODUCT_ID.is_match(raw)
 }
 
-pub fn parse_search_results(html: &str, limit: usize) -> Vec<ProductHit> {
+pub fn parse_search_results(html: &str) -> Vec<ProductHit> {
     let document = Html::parse_fragment(html);
-    let mut hits = Vec::new();
-    for product in document.select(&PRODUCT_CARDS) {
-        let Some(link) = product.select(&PRODUCT_LINK).next() else {
-            continue;
-        };
-        let Some(href) = link.value().attr("href") else {
-            continue;
-        };
-        let Some((provider_id, url)) = product_url(href) else {
-            continue;
-        };
-        let Some(title) = product
-            .select(&PRODUCT_TITLE)
-            .next()
-            .map(element_text)
-            .filter(|title| !title.is_empty())
-        else {
-            continue;
-        };
-        let cover = product.select(&PRODUCT_IMAGE).next().and_then(parse_cover);
-        let (title, subtitle, series) = split_series_title(&title);
-        hits.push(ProductHit {
-            provider_id,
-            url,
-            title,
-            subtitle,
-            cover: cover
-                .as_ref()
-                .map_or_else(String::new, |cover| cover.url.clone()),
-            cover_width: cover.as_ref().map_or(0, |cover| cover.width),
-            cover_height: cover.as_ref().map_or(0, |cover| cover.height),
-            series,
-        });
-        if hits.len() == limit {
-            break;
-        }
-    }
-    hits
+    document
+        .select(&PRODUCT_CARDS)
+        .filter_map(|product| {
+            let href = product.select(&PRODUCT_LINK).next()?.value().attr("href")?;
+            let (provider_id, url) = product_url(href)?;
+            let title = product
+                .select(&PRODUCT_TITLE)
+                .next()
+                .map(element_text)
+                .filter(|title| !title.is_empty())?;
+            Some(ProductHit {
+                provider_id,
+                url,
+                title,
+            })
+        })
+        .collect()
 }
 
-pub fn map_product(hit: &ProductHit, detail: &Html) -> BookMetadata {
+/// Soundbooth Theater lists matches newest first and also matches the query against descriptions,
+/// so "Riftside, Book 1" comes after Books 4, 3 and 2, and a title the store does not sell finds
+/// books whose blurbs mention it. Hits are ranked by their own titles instead: the exact title
+/// first, then by the words and then the numbers they share with it. A hit sharing no word with it
+/// is left out.
+pub fn rank_hits(hits: Vec<ProductHit>, query: &str, limit: usize) -> Vec<ProductHit> {
+    let wanted = TitleWords::of(query);
+    let mut ranked: Vec<_> = hits
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, hit)| {
+            let found = TitleWords::of(&hit.title);
+            let exact = found.all == wanted.all;
+            let words = found.words.intersection(&wanted.words).count();
+            let numbers = found.numbers.intersection(&wanted.numbers).count();
+            (exact || words > 0).then_some((
+                Reverse(exact),
+                Reverse(words),
+                Reverse(numbers),
+                index,
+                hit,
+            ))
+        })
+        .collect();
+    ranked.sort_by_key(|(exact, words, numbers, index, _)| (*exact, *words, *numbers, *index));
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(.., hit)| hit)
+        .collect()
+}
+
+struct TitleWords {
+    all: Vec<String>,
+    words: HashSet<String>,
+    numbers: HashSet<String>,
+}
+
+impl TitleWords {
+    fn of(title: &str) -> Self {
+        let all: Vec<String> = title
+            .split(|character: char| !character.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect();
+        let (numbers, words) = all
+            .iter()
+            .filter(|word| !FILLER_WORDS.contains(&word.as_str()))
+            .cloned()
+            .partition(|word| word.bytes().all(|byte| byte.is_ascii_digit()));
+        Self {
+            all,
+            words,
+            numbers,
+        }
+    }
+}
+
+/// Everything comes from the product page, so a search and a later lookup of the same id give the
+/// same record.
+pub fn map_product(provider_id: &str, url: &str, detail: &Html) -> BookMetadata {
+    let raw_title = detail
+        .select(&DETAIL_TITLE)
+        .next()
+        .map(element_text)
+        .filter(|title| !title.is_empty())
+        .or_else(|| {
+            detail
+                .select(&OG_TITLE)
+                .next()
+                .and_then(|element| element.value().attr("content"))
+                .map(|title| {
+                    title
+                        .split(" - Soundbooth Theater")
+                        .next()
+                        .unwrap_or(title)
+                        .trim()
+                        .to_string()
+                })
+                .filter(|title| !title.is_empty())
+        })
+        .unwrap_or_default();
+    let (title, series) = split_series_title(&raw_title);
     let mut book = BookMetadata {
         media_type: "audiobook".into(),
-        provider_id: hit.provider_id.clone(),
-        title: hit.title.clone(),
-        subtitle: hit.subtitle.clone(),
-        cover: hit.cover.clone(),
-        cover_width: hit.cover_width,
-        cover_height: hit.cover_height,
-        series: hit.series.clone(),
-        url: hit.url.clone(),
+        provider_id: provider_id.to_string(),
+        title,
+        series,
+        url: url.to_string(),
         ..BookMetadata::default()
     };
-
-    if book.title.is_empty() {
-        book.title = detail
-            .select(&DETAIL_TITLE)
-            .next()
-            .map(element_text)
-            .filter(|title| !title.is_empty())
-            .or_else(|| {
-                detail
-                    .select(&OG_TITLE)
-                    .next()
-                    .and_then(|element| element.value().attr("content"))
-                    .map(|title| {
-                        title
-                            .split(" - Soundbooth Theater")
-                            .next()
-                            .unwrap_or(title)
-                            .trim()
-                            .to_string()
-                    })
-                    .filter(|title| !title.is_empty())
-            })
-            .unwrap_or_default();
-    }
 
     book.authors = unique(detail.select(&AUTHOR_LINKS).map(element_text));
     for item in detail.select(&AUDIOBOOK_ITEMS) {
@@ -218,23 +229,19 @@ pub fn map_product(hit: &ProductHit, detail: &Html) -> BookMetadata {
             "narration" | "featuring" => {
                 let linked: Vec<String> = item.select(&LINKS).map(element_text).collect();
                 if linked.is_empty() {
-                    let text = element_text(item);
-                    let name = text
-                        .split_once(':')
-                        .map_or(text.as_str(), |(_, value)| value)
-                        .trim();
+                    let name = item_value(item);
                     if !name.is_empty() {
-                        book.narrators.push(name.to_string());
+                        book.narrators.push(name);
                     }
                 } else {
                     book.narrators.extend(linked);
                 }
             }
-            "length" => {
-                let text = element_text(item);
-                book.duration =
-                    parse_duration(text.split_once(':').map_or(text.as_str(), |(_, v)| v));
-            }
+            "length" => book.duration = parse_duration(&item_value(item)),
+            // The page's own publication date is when the store listed it, often years after
+            // the release, so the year comes only from the stated release date.
+            "release date" => book.published_year = year_in(&item_value(item)),
+            "imprint" => book.publisher = item_value(item),
             "genres" => book.genres.extend(item.select(&LINKS).map(element_text)),
             "series" => {
                 for name in item.select(&LINKS).map(element_text) {
@@ -245,10 +252,7 @@ pub fn map_product(hit: &ProductHit, detail: &Html) -> BookMetadata {
         }
     }
     book.narrators = unique(book.narrators);
-    book.genres
-        .extend(detail.select(&POSTED_GENRES).map(element_text));
     book.genres = unique(book.genres);
-    book.published_year = published_year(detail);
 
     let description = detail
         .select(&SYNOPSIS)
@@ -265,21 +269,16 @@ pub fn map_product(hit: &ProductHit, detail: &Html) -> BookMetadata {
                 .map(str::to_string)
         })
         .unwrap_or_default();
-    if let Some((description, publisher)) = split_copyright(&description) {
-        book.description = description;
-        book.publisher = publisher;
-    } else {
-        book.description = description;
+    let (description, audio_publisher) = split_copyright(&description);
+    book.description = description;
+    if book.publisher.is_empty() {
+        book.publisher = audio_publisher;
     }
 
-    if book.cover.is_empty() {
-        if let Some(cover) = detail
-            .select(&OG_IMAGE)
-            .next()
-            .and_then(|element| element.value().attr("content"))
-        {
-            book.cover = cover.to_string();
-        }
+    if let Some((cover, width, height)) = gallery_cover(detail) {
+        book.cover = cover;
+        book.cover_width = width;
+        book.cover_height = height;
     }
     book
 }
@@ -297,68 +296,37 @@ fn product_url(raw: &str) -> Option<(String, String)> {
     valid_product_id(id).then(|| (id.to_string(), url.to_string()))
 }
 
-struct Cover {
-    url: String,
-    width: u32,
-    height: u32,
-}
-
-fn parse_cover(image: ElementRef<'_>) -> Option<Cover> {
-    let source_width = image
-        .value()
-        .attr("width")
-        .and_then(|v| v.parse::<u32>().ok());
-    let source_height = image
-        .value()
-        .attr("height")
-        .and_then(|v| v.parse::<u32>().ok());
-    let mut candidates = image
-        .value()
-        .attr("srcset")
-        .unwrap_or_default()
-        .split(',')
-        .filter_map(|entry| {
-            let mut pieces = entry.split_whitespace();
-            let url = pieces.next()?.trim();
-            let descriptor = pieces.next().unwrap_or_default();
-            let width = descriptor.strip_suffix('w')?.parse::<u32>().ok()?;
-            (!url.is_empty()).then(|| (width, url.to_string()))
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by_key(|(width, _)| *width);
-    let (width, url) = candidates.pop().or_else(|| {
-        image
-            .value()
-            .attr("src")
-            .filter(|src| !src.is_empty())
-            .map(|src| (source_width.unwrap_or_default(), src.to_string()))
-    })?;
-    let height = match (source_width, source_height) {
-        (Some(source_width), Some(source_height)) if source_width > 0 => {
-            width.saturating_mul(source_height) / source_width
-        }
-        _ => 0,
+/// The product image's full-size original. The page's `og:image` is a wide social banner, not the
+/// cover.
+fn gallery_cover(detail: &Html) -> Option<(String, u32, u32)> {
+    let image = detail.select(&GALLERY_IMAGE).next()?;
+    let attr = |name: &str| image.value().attr(name).filter(|value| !value.is_empty());
+    let number = |name: &str| {
+        attr(name)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_default()
     };
-    Some(Cover { url, width, height })
+    match attr("data-large_image") {
+        Some(url) => Some((
+            url.to_string(),
+            number("data-large_image_width"),
+            number("data-large_image_height"),
+        )),
+        None => attr("src").map(|url| (url.to_string(), number("width"), number("height"))),
+    }
 }
 
-fn split_series_title(raw: &str) -> (String, String, Vec<Series>) {
-    let Some(captures) = TITLE_SERIES.captures(raw.trim()) else {
-        return (raw.trim().to_string(), String::new(), Vec::new());
+/// "Series, Book 2" keeps its title; "Series, Book 2: Name" is titled "Name". Either way the
+/// series and its position come out of the title.
+fn split_series_title(raw: &str) -> (String, Vec<Series>) {
+    let raw = raw.trim();
+    let Some(captures) = TITLE_SERIES.captures(raw) else {
+        return (raw.to_string(), Vec::new());
     };
     let series = captures.get(1).map_or("", |value| value.as_str()).trim();
     let sequence = captures.get(2).map_or("", |value| value.as_str()).trim();
-    let subtitle = captures.get(3).map_or("", |value| value.as_str()).trim();
-    let title = if subtitle.is_empty() {
-        raw.trim().to_string()
-    } else {
-        subtitle.to_string()
-    };
-    let subtitle = if subtitle.is_empty() {
-        String::new()
-    } else {
-        raw.trim().to_string()
-    };
+    let name = captures.get(3).map_or("", |value| value.as_str()).trim();
+    let title = if name.is_empty() { raw } else { name };
     let series = if series.is_empty() {
         Vec::new()
     } else {
@@ -367,7 +335,7 @@ fn split_series_title(raw: &str) -> (String, String, Vec<Series>) {
             sequence: sequence.to_string(),
         }]
     };
-    (title, subtitle, series)
+    (title.to_string(), series)
 }
 
 fn add_series(series: &mut Vec<Series>, name: String, sequence: String) {
@@ -401,52 +369,33 @@ fn paragraph_text(root: ElementRef<'_>) -> String {
     }
 }
 
-fn split_copyright(raw: &str) -> Option<(String, String)> {
-    let (description, credits) = raw.split_once('\u{00a9}')?;
-    let publisher = credits
-        .split('\u{2117}')
-        .next()
-        .unwrap_or_default()
+/// Splits the closing credits line ("© 2026 Book Publisher ℗ 2026 Soundbooth Theater") off a
+/// description. The ℗ holder made the recording, so it is the audiobook's publisher; the ©
+/// holder published the book.
+fn split_copyright(raw: &str) -> (String, String) {
+    let Some((description, credits)) = raw.split_once('\u{00a9}') else {
+        return (raw.to_string(), String::new());
+    };
+    let recording = credits
+        .split_once('\u{2117}')
+        .map_or("", |(_, holder)| holder)
         .split_whitespace()
         .collect::<Vec<_>>();
-    let publisher = if publisher
-        .first()
-        .is_some_and(|year| year.len() == 4 && year.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        publisher[1..].join(" ")
-    } else {
-        publisher.join(" ")
-    };
-    Some((description.trim().to_string(), publisher))
-}
-
-fn published_year(document: &Html) -> String {
-    for script in document.select(&JSON_LD) {
-        let raw = script.text().collect::<String>();
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-            continue;
-        };
-        let graph: Vec<&Value> = value
-            .get("@graph")
-            .and_then(Value::as_array)
-            .map(|nodes| nodes.iter().collect())
-            .unwrap_or_else(|| vec![&value]);
-        if let Some(year) = graph
-            .iter()
-            .filter_map(|node| node.get("datePublished").and_then(Value::as_str))
-            .find_map(year_prefix)
-        {
-            return year;
+    let recording = match recording.split_first() {
+        Some((year, rest)) if year.len() == 4 && year.bytes().all(|byte| byte.is_ascii_digit()) => {
+            rest.join(" ")
         }
-    }
-    String::new()
+        _ => recording.join(" "),
+    };
+    (description.trim().to_string(), recording)
 }
 
-fn year_prefix(date: &str) -> Option<String> {
-    let year = date.get(..4)?;
-    year.bytes()
-        .all(|byte| byte.is_ascii_digit())
-        .then(|| year.to_string())
+/// The four-digit year in a date the store writes as `07/14/2026`.
+fn year_in(date: &str) -> String {
+    date.split(|character: char| !character.is_ascii_digit())
+        .find(|part| part.len() == 4)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn parse_duration(raw: &str) -> Option<u32> {
@@ -465,8 +414,31 @@ fn parse_duration(raw: &str) -> Option<u32> {
     (seconds > 0).then(|| seconds.min(u64::from(u32::MAX)) as u32)
 }
 
+/// What follows the label in `<li><span>Imprint: </span>Soundbooth Theater</li>`.
+fn item_value(item: ElementRef<'_>) -> String {
+    let text = element_text(item);
+    text.split_once(':')
+        .map_or(text.as_str(), |(_, value)| value)
+        .trim()
+        .to_string()
+}
+
+/// Text pieces are joined as they stand, so "<i>Carl</i>, <i>Dan</i>" reads "Carl, Dan"; a `<br>`
+/// still keeps the words on either side apart.
 fn element_text(element: ElementRef<'_>) -> String {
-    normalize(&element.text().collect::<Vec<_>>().join(" "))
+    let mut text = String::new();
+    for node in element.descendants() {
+        if let Some(fragment) = node.value().as_text() {
+            text.push_str(fragment);
+        } else if node
+            .value()
+            .as_element()
+            .is_some_and(|tag| tag.name() == "br")
+        {
+            text.push(' ');
+        }
+    }
+    normalize(&text)
 }
 
 fn normalize(value: &str) -> String {
@@ -486,50 +458,112 @@ fn unique(values: impl IntoIterator<Item = String>) -> Vec<String> {
 mod tests {
     use super::*;
 
-    const SEARCH: &str = include_str!("../testdata/search-rickshaw-riot.html");
     const DETAIL: &str = include_str!("../testdata/detail-rickshaw-riot.html");
 
-    #[test]
-    fn parses_a_real_product_card_and_chooses_largest_cover() {
-        let hits = parse_search_results(SEARCH, 3);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].provider_id, "rickshaw-riot-book-1");
-        assert_eq!(hits[0].title, "Rickshaw Riot, Book 1");
-        assert_eq!(hits[0].cover_width, 1024);
-        assert_eq!(hits[0].cover_height, 1024);
-        assert!(hits[0].cover.ends_with("RickshawRiot_Cover.jpg"));
-        assert_eq!(hits[0].series[0].series, "Rickshaw Riot");
-        assert_eq!(hits[0].series[0].sequence, "1");
+    fn riftside_hits() -> Vec<ProductHit> {
+        let answer: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/search-riftside.json")).unwrap();
+        parse_search_results(answer["posts"].as_str().unwrap())
     }
 
     #[test]
-    fn maps_product_details_to_bookorbit_metadata() {
-        let hit = parse_search_results(SEARCH, 1).remove(0);
+    fn parses_every_card_of_a_real_search_answer() {
+        let hits = riftside_hits();
+        let titles: Vec<&str> = hits.iter().map(|hit| hit.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "Riftside, Book 4",
+                "Riftside, Book 3",
+                "Riftside, Book 2",
+                "Riftside, Book 1"
+            ]
+        );
+        assert_eq!(hits[3].provider_id, "riftside-book-1");
+        assert_eq!(
+            hits[3].url,
+            "https://soundbooththeater.com/shop/audiobooks/riftside-book-1/"
+        );
+    }
+
+    #[test]
+    fn ranks_the_named_volume_first_within_the_limit() {
+        let ranked = rank_hits(riftside_hits(), "Riftside, Book 1", 3);
+        assert_eq!(ranked.len(), 3);
+        assert_eq!(ranked[0].provider_id, "riftside-book-1");
+        let ranked = rank_hits(riftside_hits(), "Riftside 2", 3);
+        assert_eq!(ranked[0].provider_id, "riftside-book-2");
+    }
+
+    #[test]
+    fn leaves_out_hits_sharing_no_title_word() {
+        assert!(rank_hits(riftside_hits(), "He Who Fights with Monsters", 3).is_empty());
+    }
+
+    #[test]
+    fn maps_a_real_product_page() {
         let detail = Html::parse_document(DETAIL);
-        let book = map_product(&hit, &detail);
+        let book = map_product(
+            "rickshaw-riot-book-1",
+            "https://soundbooththeater.com/shop/audiobooks/rickshaw-riot-book-1/",
+            &detail,
+        );
         assert_eq!(book.media_type, "audiobook");
         assert_eq!(book.title, "Rickshaw Riot, Book 1");
+        assert_eq!(
+            book.series,
+            [Series {
+                series: "Rickshaw Riot".into(),
+                sequence: "1".into()
+            }]
+        );
         assert_eq!(book.authors, ["Ben Wolf", "Luke Messa"]);
         assert_eq!(
             book.narrators,
-            ["Ryan H. Reid", "Gary Furlong", "Jeff Hays"]
+            [
+                "Ryan H. Reid",
+                "Gary Furlong",
+                "Jeff Hays",
+                "Annie Ellicott",
+                "Rebecca Brokaw-Sands",
+                "Johnathan McClain"
+            ]
         );
         assert_eq!(book.duration, Some(35_760));
-        assert_eq!(book.publisher, "Splickety Publishing Group");
+        assert_eq!(book.publisher, "Soundbooth Theater");
         assert_eq!(book.published_year, "2026");
-        assert_eq!(book.genres, ["Fantasy", "LitRPG"]);
-        assert_eq!(book.series[0].sequence, "1");
-        assert_eq!(book.description, "A short test synopsis.");
+        assert_eq!(book.genres, ["Humor", "LitRPG", "Science Fiction"]);
+        assert!(book.cover.ends_with("/RickshawRiot_Cover.jpg"));
+        assert_eq!((book.cover_width, book.cover_height), (1024, 1024));
+        assert!(book.description.starts_with("Video game mogul, Erik Shaw,"));
+        assert!(book
+            .description
+            .contains("fans of Dungeon Crawler Carl, Discount Dan, and He Who Fights"));
+        assert!(!book.description.contains('\u{00a9}'));
     }
 
     #[test]
-    fn lookup_populates_title_from_the_product_page() {
-        let detail = Html::parse_document(DETAIL);
-        let hit = ProductHit::lookup(
-            "rickshaw-riot-book-1",
-            "https://soundbooththeater.com/shop/audiobooks/rickshaw-riot-book-1/",
+    fn a_named_volume_is_titled_by_its_name() {
+        let (title, series) = split_series_title("The Feedback Loop, Book 3: High Fantasy");
+        assert_eq!(title, "High Fantasy");
+        assert_eq!(series[0].series, "The Feedback Loop");
+        assert_eq!(series[0].sequence, "3");
+    }
+
+    #[test]
+    fn the_recording_holder_is_the_fallback_publisher() {
+        let (description, publisher) = split_copyright(
+            "A blurb long enough to keep.\n\n\u{00a9} 2017 A Book House \u{2117} 2020 Soundbooth Theater",
         );
-        assert_eq!(map_product(&hit, &detail).title, "Rickshaw Riot, Book 1");
+        assert_eq!(description, "A blurb long enough to keep.");
+        assert_eq!(publisher, "Soundbooth Theater");
+    }
+
+    #[test]
+    fn a_line_break_keeps_words_apart() {
+        let fragment = Html::parse_fragment("<p>First line<br>second <i>line</i>, done</p>");
+        let paragraph = fragment.select(&PARAGRAPH).next().unwrap();
+        assert_eq!(element_text(paragraph), "First line second line, done");
     }
 
     #[test]

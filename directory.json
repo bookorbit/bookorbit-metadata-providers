@@ -130,6 +130,7 @@
       "port": 8080,
       "docsUrl": "https://github.com/bookorbit/bookorbit-metadata-providers/tree/main/providers/soundbooththeater",
       "homepage": "https://soundbooththeater.com",
+      "color": "#7900f4",
       "mediaTypes": [
         "audiobook"
       ],

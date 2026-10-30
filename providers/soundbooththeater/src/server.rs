@@ -36,12 +36,13 @@ async fn info(State(state): State<AppState>) -> Json<serde_json::Value> {
         "name": "Soundbooth Theater",
         "version": VERSION,
         "avatarUrl": "https://soundbooththeater.com/wp-content/uploads/2020/07/cropped-sbt-favicon-2-180x180.jpg",
+        "color": "#7900f4",
         "authenticationRequired": state.auth_token.is_some(),
         "key": "soundbooththeater",
         "mediaTypes": ["audiobook"],
         "lookup": true,
         "supportedFields": [
-            "title", "subtitle", "description", "cover", "authors", "narrators", "publisher",
+            "title", "description", "cover", "authors", "narrators", "publisher",
             "publishedYear", "duration", "genres", "seriesName", "seriesIndex"
         ],
         "searchParams": ["limit"],
@@ -70,9 +71,8 @@ async fn search(
     if title.is_empty() {
         return error(StatusCode::BAD_REQUEST, "query is required");
     }
-    if !param("mediaType").is_empty() && param("mediaType") != "audiobook" {
-        return Json(json!({ "matches": [] })).into_response();
-    }
+    // Every record is an audiobook whatever `mediaType` asks for: BookOrbit asks with `book` for a
+    // book that has both an ebook and audio, and ranks the records by medium itself.
     let limit = param("limit")
         .parse::<usize>()
         .map_or(DEFAULT_LIMIT, |limit| limit.clamp(1, MAX_LIMIT));

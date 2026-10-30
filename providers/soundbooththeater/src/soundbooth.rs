@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
 
-use crate::mapping::{map_product, parse_search_results, BookMetadata, ProductHit};
+use crate::mapping::{map_product, parse_search_results, rank_hits, BookMetadata, ProductHit};
 
 pub const SITE: &str = "https://soundbooththeater.com";
 const MAX_BODY_BYTES: usize = 4 << 20;
@@ -106,14 +106,14 @@ impl Soundbooth {
                 "Soundbooth Theater AJAX search returned success=false".into(),
             ));
         }
-        let posts = envelope.posts.unwrap_or_default();
-        let hits = parse_search_results(&posts, limit.clamp(1, MAX_RESULTS));
+        let hits = search_hits(envelope.posts.as_deref().unwrap_or_default())?;
+        let hits = rank_hits(hits, title, limit.clamp(1, MAX_RESULTS));
         let mut matches = Vec::new();
         let mut partial = false;
         let mut failure = None;
         for hit in hits {
             match tokio::time::timeout_at(deadline, self.product_page(&hit.provider_id)).await {
-                Ok(Ok(html)) => matches.push(map_product(&hit, &html)),
+                Ok(Ok(html)) => matches.push(map_product(&hit.provider_id, &hit.url, &html)),
                 Ok(Err(UpstreamError::NotFound)) => partial = true,
                 Ok(Err(error)) => {
                     partial = true;
@@ -141,8 +141,7 @@ impl Soundbooth {
         match self.product_page(id).await {
             Ok(html) => {
                 let url = self.product_url(id)?;
-                let hit = ProductHit::lookup(id, url.as_str());
-                Ok(Some(map_product(&hit, &html)))
+                Ok(Some(map_product(id, url.as_str(), &html)))
             }
             Err(UpstreamError::NotFound) => Ok(None),
             Err(error) => Err(error),
@@ -150,23 +149,11 @@ impl Soundbooth {
     }
 
     async fn search_page(&self, query: &str) -> Result<SearchEnvelope, UpstreamError> {
-        let mut referer = Url::parse(&self.inner.site)
-            .map_err(|error| UpstreamError::Failed(error.to_string()))?;
-        referer
-            .query_pairs_mut()
-            .append_pair("s", query)
-            .append_pair("post_type", "product");
         let request = self
             .inner
             .http
             .post(format!("{}/wp-admin/admin-ajax.php", self.inner.site))
-            .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header("Origin", &self.inner.site)
-            .header("Referer", referer.as_str())
-            .header("Sec-Fetch-Dest", "empty")
-            .header("Sec-Fetch-Mode", "no-cors")
+            .header("Accept", "application/json")
             .form(&[
                 ("action", "loadmore"),
                 ("page", "0"),
@@ -184,15 +171,7 @@ impl Soundbooth {
             return Err(UpstreamError::NotFound);
         }
         let url = self.product_url(id)?;
-        let request = self
-            .inner
-            .http
-            .get(url)
-            .header(
-                "Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .header("Accept-Language", "en-US,en;q=0.9");
+        let request = self.inner.http.get(url).header("Accept", "text/html");
         let body = self.send(request).await?;
         let html = String::from_utf8(body)
             .map_err(|error| UpstreamError::Failed(format!("invalid Soundbooth HTML: {error}")))?;
@@ -274,9 +253,46 @@ fn search_succeeded(value: &Value) -> bool {
     }
 }
 
+/// No match is an empty `posts`. Products that can no longer be read mean the store's markup
+/// changed, which has to fail rather than tell BookOrbit the book is not there.
+fn search_hits(posts: &str) -> Result<Vec<ProductHit>, UpstreamError> {
+    if posts.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let hits = parse_search_results(posts);
+    if hits.is_empty() {
+        return Err(UpstreamError::Failed(
+            "Soundbooth Theater search results could not be read".into(),
+        ));
+    }
+    Ok(hits)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn posts(raw: &str) -> String {
+        let response: SearchEnvelope = serde_json::from_str(raw).unwrap();
+        assert!(search_succeeded(&response.success));
+        response.posts.unwrap_or_default()
+    }
+
+    #[test]
+    fn reads_real_search_answers() {
+        let none = posts(include_str!("../testdata/search-none.json"));
+        assert!(search_hits(&none).unwrap().is_empty());
+        let riftside = posts(include_str!("../testdata/search-riftside.json"));
+        assert_eq!(search_hits(&riftside).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn unreadable_results_are_a_failure_not_an_empty_answer() {
+        assert!(matches!(
+            search_hits("<div class=\"redesigned\">Riftside, Book 1</div>"),
+            Err(UpstreamError::Failed(_))
+        ));
+    }
 
     #[test]
     fn accepts_wordpress_success_values() {
