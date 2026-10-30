@@ -28,7 +28,7 @@ a Rust toolchain, `cargo run --release`.
 
 Soundbooth Theater has no metadata API, so the provider reads the store's product search and product
 pages. It sends one request at a time, at least a second apart, which a search of three matches
-takes about four seconds to get through. It sends Soundbooth Theater the title and author, and
+takes about four seconds to get through, five when it has to drop the author. It sends Soundbooth Theater the title and author, and
 stores nothing.
 
 ## Endpoints
@@ -47,10 +47,14 @@ shape the provider cannot read.
 
 - **Medium:** every record is an `audiobook`, whatever `mediaType` asks for. BookOrbit asks with
   `book` for a book that has both an ebook and audio, and ranks the records by medium itself.
-- **Matching:** the store lists matches newest first and also matches descriptions, so its answer
-  is reordered by title: the exact title first, then the titles sharing the most words and then
-  numbers with the query. "Riftside, Book 1" finds Book 1 ahead of Books 4, 3 and 2. A product
-  whose title shares no word with the query is left out.
+- **Matching:** the store needs every word of the query, so the title and author are searched
+  together, then the title alone if that finds nothing: an author spelled differently, or not
+  credited, still finds the book. The store lists matches newest first and also matches
+  descriptions, so its answer is reordered by title: an exact title first, whole or the name after
+  "Series, Book 1:", then the titles sharing the most words and then numbers with the query, then
+  the shortest. "Riftside, Book 1" finds Book 1 ahead of Books 4, 3 and 2, and "Life Reset" finds
+  "New Era Online, Book 1: Life Reset" ahead of its sequels. A product whose title shares no word
+  with the query is left out.
 - **Ids** are the product's slug in `/shop/audiobooks/<slug>/`. Every record is read from its
   product page, so a search and a later lookup of the same id give the same record.
 - **Title and series:** "Riftside, Book 1" is the title, with series Riftside at position 1;

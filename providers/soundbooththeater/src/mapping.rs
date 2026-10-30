@@ -125,9 +125,9 @@ pub fn parse_search_results(html: &str) -> Vec<ProductHit> {
 
 /// Soundbooth Theater lists matches newest first and also matches the query against descriptions,
 /// so "Riftside, Book 1" comes after Books 4, 3 and 2, and a title the store does not sell finds
-/// books whose blurbs mention it. Hits are ranked by their own titles instead: the exact title
-/// first, then by the words and then the numbers they share with it. A hit sharing no word with it
-/// is left out.
+/// books whose blurbs mention it. Hits are ranked by their own titles instead: an exact title
+/// first, whole or the name after "Series, Book 1:", then by the words and then the numbers they
+/// share with it, then by the fewest words it lacks. A hit sharing no word with it is left out.
 pub fn rank_hits(hits: Vec<ProductHit>, query: &str, limit: usize) -> Vec<ProductHit> {
     let wanted = TitleWords::of(query);
     let mut ranked: Vec<_> = hits
@@ -135,19 +135,24 @@ pub fn rank_hits(hits: Vec<ProductHit>, query: &str, limit: usize) -> Vec<Produc
         .enumerate()
         .filter_map(|(index, hit)| {
             let found = TitleWords::of(&hit.title);
-            let exact = found.all == wanted.all;
+            let (name, _) = split_series_title(&hit.title);
+            let exact = found.all == wanted.all || TitleWords::of(&name).all == wanted.all;
             let words = found.words.intersection(&wanted.words).count();
             let numbers = found.numbers.intersection(&wanted.numbers).count();
+            let extra = found.words.len() - words;
             (exact || words > 0).then_some((
                 Reverse(exact),
                 Reverse(words),
                 Reverse(numbers),
+                extra,
                 index,
                 hit,
             ))
         })
         .collect();
-    ranked.sort_by_key(|(exact, words, numbers, index, _)| (*exact, *words, *numbers, *index));
+    ranked.sort_by_key(|(exact, words, numbers, extra, index, _)| {
+        (*exact, *words, *numbers, *extra, *index)
+    });
     ranked
         .into_iter()
         .take(limit)
@@ -460,10 +465,13 @@ mod tests {
 
     const DETAIL: &str = include_str!("../testdata/detail-rickshaw-riot.html");
 
-    fn riftside_hits() -> Vec<ProductHit> {
-        let answer: serde_json::Value =
-            serde_json::from_str(include_str!("../testdata/search-riftside.json")).unwrap();
+    fn hits(raw: &str) -> Vec<ProductHit> {
+        let answer: serde_json::Value = serde_json::from_str(raw).unwrap();
         parse_search_results(answer["posts"].as_str().unwrap())
+    }
+
+    fn riftside_hits() -> Vec<ProductHit> {
+        hits(include_str!("../testdata/search-riftside.json"))
     }
 
     #[test]
@@ -493,6 +501,14 @@ mod tests {
         assert_eq!(ranked[0].provider_id, "riftside-book-1");
         let ranked = rank_hits(riftside_hits(), "Riftside 2", 3);
         assert_eq!(ranked[0].provider_id, "riftside-book-2");
+    }
+
+    #[test]
+    fn a_volume_named_like_the_query_beats_newer_volumes() {
+        let life_reset = hits(include_str!("../testdata/search-life-reset.json"));
+        assert_eq!(life_reset.len(), 6);
+        let ranked = rank_hits(life_reset, "Life Reset", 3);
+        assert_eq!(ranked[0].provider_id, "life-reset-a-litrpg-novel");
     }
 
     #[test]

@@ -77,36 +77,24 @@ impl Soundbooth {
         author: &str,
         limit: usize,
     ) -> Result<SearchAnswer, UpstreamError> {
-        let query = [title.trim(), author.trim()]
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if query.is_empty() {
+        let (title, author) = (title.trim(), author.trim());
+        if title.is_empty() {
             return Ok(SearchAnswer::default());
         }
 
         let deadline = tokio::time::Instant::now() + SEARCH_DEADLINE;
-        let envelope = match tokio::time::timeout_at(deadline, self.search_page(&query)).await {
-            Ok(Ok(envelope)) => envelope,
-            Ok(Err(UpstreamError::NotFound)) => {
-                return Err(UpstreamError::Failed(
-                    "Soundbooth Theater AJAX search endpoint was not found".into(),
-                ))
-            }
-            Ok(Err(error)) => return Err(error),
-            Err(_) => {
-                return Err(UpstreamError::Failed(
-                    "Soundbooth Theater search timed out".into(),
-                ))
-            }
+        let mut posts = if author.is_empty() {
+            self.search_posts(title, deadline).await?
+        } else {
+            self.search_posts(&format!("{title} {author}"), deadline)
+                .await?
         };
-        if !search_succeeded(&envelope.success) {
-            return Err(UpstreamError::Failed(
-                "Soundbooth Theater AJAX search returned success=false".into(),
-            ));
+        // The store needs every word of the query, so an author it spells differently or does
+        // not credit finds nothing; the title alone is tried before answering that.
+        if posts.trim().is_empty() && !author.is_empty() {
+            posts = self.search_posts(title, deadline).await?;
         }
-        let hits = search_hits(envelope.posts.as_deref().unwrap_or_default())?;
+        let hits = search_hits(&posts)?;
         let hits = rank_hits(hits, title, limit.clamp(1, MAX_RESULTS));
         let mut matches = Vec::new();
         let mut partial = false;
@@ -146,6 +134,33 @@ impl Soundbooth {
             Err(UpstreamError::NotFound) => Ok(None),
             Err(error) => Err(error),
         }
+    }
+
+    async fn search_posts(
+        &self,
+        query: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<String, UpstreamError> {
+        let envelope = match tokio::time::timeout_at(deadline, self.search_page(query)).await {
+            Ok(Ok(envelope)) => envelope,
+            Ok(Err(UpstreamError::NotFound)) => {
+                return Err(UpstreamError::Failed(
+                    "Soundbooth Theater AJAX search endpoint was not found".into(),
+                ))
+            }
+            Ok(Err(error)) => return Err(error),
+            Err(_) => {
+                return Err(UpstreamError::Failed(
+                    "Soundbooth Theater search timed out".into(),
+                ))
+            }
+        };
+        if !search_succeeded(&envelope.success) {
+            return Err(UpstreamError::Failed(
+                "Soundbooth Theater AJAX search returned success=false".into(),
+            ));
+        }
+        Ok(envelope.posts.unwrap_or_default())
     }
 
     async fn search_page(&self, query: &str) -> Result<SearchEnvelope, UpstreamError> {
