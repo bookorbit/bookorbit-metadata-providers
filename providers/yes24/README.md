@@ -1,28 +1,33 @@
 # BookOrbit YES24 Metadata Provider
 
-Rust 기반 BookOrbit 외부 메타데이터 프로바이더입니다. YES24 Open API의 상품 검색 및 상품 상세 조회 API를 사용합니다.
+[English](README.md) | [한국어](README.ko.md)
 
-- 상품 검색: `GET https://apis.yes24.com/v1/goods/itemList`
-- 상품 상세: `GET https://apis.yes24.com/v1/goods/itemDetail`
-- 인증: `X-Api-Key: <YES24_API_KEY>`
-- 문서: https://developers.yes24.com/api-doc/goods-item-list
-- 문서: https://developers.yes24.com/api-doc/goods-item-detail
+A Rust-based external metadata provider for BookOrbit. It uses the YES24 Open API for product search and product detail retrieval.
 
-## 설정
+- Product search: `GET https://apis.yes24.com/v1/goods/itemList`
+- Product detail: `GET https://apis.yes24.com/v1/goods/itemDetail`
+- Authentication: `X-Api-Key: <YES24_API_KEY>`
+- API docs: https://developers.yes24.com/api-doc/goods-item-list
+- API docs: https://developers.yes24.com/api-doc/goods-item-detail
 
-필수 환경변수:
+## Configuration
 
-- `YES24_API_KEY`: YES24 Developers에서 발급받은 API Key
+Required environment variable:
 
-선택 환경변수:
+- `YES24_API_KEY`: API key issued by YES24 Developers.
 
-- `PORT`: HTTP 포트. 기본값 `8080`
-- `AUTH_TOKEN`: 설정하면 BookOrbit에서 들어오는 요청의 `Authorization` 헤더에 같은 토큰이 있어야 합니다.
-- `USER_AGENT`: YES24 API 요청의 User-Agent. 기본값은 패키지 버전 기반 값입니다.
+Optional environment variables:
 
-YES24 API Key는 BookOrbit 클라이언트에 노출하지 말고 프로바이더 컨테이너에만 설정하세요.
+- `PORT`: HTTP server port. Default: `8080`.
+- `AUTH_TOKEN`: When set, incoming BookOrbit requests must include the same value in the `Authorization` header.
+- `USER_AGENT`: User-Agent sent to the YES24 API. Defaults to a value based on the package version.
+- `YES24_API_BASE_URL`: Base URL for the YES24 goods API. Default: `https://apis.yes24.com/v1/goods`. Override it to use a compatible proxy or local mock server.
+- `REQUESTS_PER_SECOND`: Maximum upstream request start rate. Default: 2 requests per second (500 ms between request starts); `0` disables pacing.
+- `MAX_INFLIGHT_REQUESTS`: Maximum number of concurrent upstream HTTP requests. Default: `2`; minimum: `1`.
 
-## 실행
+Keep the YES24 API key inside the provider container. Do not expose it to BookOrbit clients.
+
+## Run
 
 ```bash
 YES24_API_KEY=your_api_key cargo run --release
@@ -32,6 +37,8 @@ cargo clippy --all-targets -- -D warnings
 
 ## Docker
 
+Build and run the image:
+
 ```bash
 docker build -t bookorbit-yes24-provider:latest .
 docker run -d --name bookorbit-yes24-provider \
@@ -40,7 +47,7 @@ docker run -d --name bookorbit-yes24-provider \
   bookorbit-yes24-provider:latest
 ```
 
-기존 BookOrbit Compose에 서비스를 추가하는 예시:
+Example service definition for an existing BookOrbit Compose project:
 
 ```yaml
 yes24-provider:
@@ -50,45 +57,63 @@ yes24-provider:
   init: true
   environment:
     YES24_API_KEY: ${YES24_API_KEY?required}
-    # 선택 사항: BookOrbit 외부 프로바이더 요청도 보호할 때 사용
+    # Default: https://apis.yes24.com/v1/goods
+    # YES24_API_BASE_URL: https://apis.yes24.com/v1/goods
+    # Upstream request start rate (default 2/sec; 0 disables pacing)
+    # REQUESTS_PER_SECOND: 2
+    # Maximum concurrent upstream HTTP requests (default 2, minimum 1)
+    # MAX_INFLIGHT_REQUESTS: 2
+    # Optional: protect requests coming into this provider from BookOrbit
     # AUTH_TOKEN: ${BOOKORBIT_PROVIDER_TOKEN}
-    # 선택 사항: BookOrbit이 동일 네트워크 안에 있지 않은 경우 사용
   ports:
     - "8081:8080"
 ```
 
-BookOrbit의 외부 메타데이터 프로바이더 URL은 같은 Compose 네트워크라면 `http://bookorbit-yes24-provider:8080`을 사용합니다. `YES24_API_KEY`는 Compose를 실행하는 디렉터리의 `.env`에 추가하거나 기존 환경변수 공급 방식을 사용하세요.
+If BookOrbit and this provider share a Compose network, configure the external provider URL in BookOrbit as `http://bookorbit-yes24-provider:8080`. Add `YES24_API_KEY` to the `.env` file in the Compose working directory or use your existing environment-variable management method.
 
-## 엔드포인트
+## Endpoints
 
-| 경로                             | 설명                            |
-| -------------------------------- | ------------------------------- |
-| `GET /provider/info`             | BookOrbit 프로바이더 메타데이터 |
-| `GET /search?query=클린코드`     | 상품 검색                       |
-| `GET /search?isbn=9788966260959` | ISBN으로 검색                   |
-| `GET /book/12345678`             | YES24 상품 번호로 상세 조회     |
+| Route | Description |
+|---|---|
+| `GET /provider/info` | BookOrbit provider metadata |
+| `GET /search?query=clean-code` | Search products |
+| `GET /search?isbn=9788966260959` | Search by ISBN |
+| `GET /book/12345678` | Retrieve details by YES24 item ID |
 
-검색 파라미터:
+Search parameters:
 
-- `query`: 필수. 검색어
-- `isbn`: `query`가 없을 때 ISBN 검색어로 사용
-- `target`: `title`, `isbn`, `publisher`, `person`. YES24 검색 API에는 동일한 target 필드가 없으므로 ISBN13은 상세 조회 API를 사용하고, 출판사/저자 필터는 반환된 검색 결과에 로컬 적용합니다.
-- `author`: 검색 결과 저자 문자열 필터
-- `sort`: `accuracy`(YES24 `DEFAULT`) 또는 `latest`(YES24 `RECENT`)
-- `page`: 1 이상 페이지 번호
-- `limit`: 결과 수, 기본 5, 최대 20
-- `category`: YES24 카테고리. 기본 `BOOK`; 허용값 `ALL`, `BOOK`, `FOREIGN`, `EBOOK`, `MUSIC`, `DVD`
+- `query`: Required search term.
+- `isbn`: Used as the ISBN search term when `query` is omitted.
+- `target`: `title`, `isbn`, `publisher` or `person`. The YES24 search API does not expose an equivalent target field. ISBN-13 uses the detail API; publisher and author filters are applied locally to returned search results.
+- `author`: Filter search results by author string.
+- `sort`: `accuracy` (YES24 `DEFAULT`) or `latest` (YES24 `RECENT`).
+- `page`: Page number, starting at 1.
+- `limit`: Number of results. Default: 5; maximum: 20.
+- `category`: YES24 category. Default: `BOOK`; accepted values: `ALL`, `BOOK`, `FOREIGN`, `EBOOK`, `MUSIC`, `DVD`.
 
-검색 시 `detail=Y`를 요청해 YES24에서 제공하는 확장 정보를 가능한 범위에서 매핑합니다. 상품 상세는 검색 결과 캐시에 의존하지 않고 YES24의 ItemId 조회 API를 호출하므로 프로세스 재시작 이후에도 조회할 수 있습니다.
+Search requests set `detail=Y` to map the extended information YES24 makes available. Product detail lookup calls YES24's ItemId detail API directly rather than relying on the search-result cache, so it continues to work after a provider restart.
 
-## 매핑 및 제한
+## Metadata mapping and limitations
 
-- `providerId`: `<ItemId>`
-- `title`: 제목. 부제목이 있으면 `제목: 부제목` 형식
-- `authors`: YES24의 단일 author 문자열을 목록으로 변환
-- `description`: 책 소개, 줄거리, 목차를 구분해 결합
-- `cover`: 커버 이미지 URL
-- `publishedDate` / `publishedYear`: 출간일에서 추출
-- `series`: 시리즈 이름을 BookOrbit 시리즈 형식으로 매핑
-- `url`: YES24 상품 링크
-- `language`: YES24 문서에서 언어 필드를 제공하지 않아 기존 Kakao 프로바이더와 동일하게 `ko`를 기본값으로 사용
+- `providerId`: `<ItemId>`.
+- `title`: Product title; when a subtitle exists, the format is `Title: Subtitle`.
+- `authors`: The single YES24 author string is converted into a list.
+- `description`: Book introduction, synopsis and table of contents are combined with section labels.
+- `cover`: Cover image URL.
+- `publishedDate` / `publishedYear`: Extracted from the publication date.
+- `series`: Series name mapped to the BookOrbit series format.
+- `url`: YES24 product URL.
+- `language`: YES24 documentation does not provide a language field, so `ko` is used as the default, matching the existing Kakao provider behavior.
+
+## Request rate limiting
+
+`REQUESTS_PER_SECOND` limits the start rate of upstream requests shared by search and detail operations. The default value `2` keeps request starts at least 500 ms apart. `MAX_INFLIGHT_REQUESTS` independently limits the number of requests being processed concurrently; its default is `2`. Setting `REQUESTS_PER_SECOND=0` disables only the start-rate pacing. `MAX_INFLIGHT_REQUESTS` has a minimum value of 1.
+
+## Tests
+
+Tests use a local Axum mock server to exercise the full Provider Router → HTTP Client → Mock upstream path. They do not call the YES24 production API.
+
+```bash
+cargo test
+cargo clippy --all-targets -- -D warnings
+```

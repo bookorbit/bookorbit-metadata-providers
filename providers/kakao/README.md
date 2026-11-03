@@ -1,5 +1,7 @@
 # BookOrbit Kakao Book Metadata Provider
 
+[English](README.md) | [한국어](README.ko.md)
+
 A Rust-based BookOrbit external metadata provider using Kakao's Daum Book Search API (`GET https://dapi.kakao.com/v3/search/book`).
 
 ## Run
@@ -11,6 +13,12 @@ services:
     restart: unless-stopped
     environment:
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY}
+      # Optional: upstream API endpoint override (defaults to Kakao's production endpoint)
+      # KAKAO_API_BASE_URL: https://dapi.kakao.com/v3/search/book
+      # Maximum upstream request start rate; default 2 requests/second (0 disables pacing)
+      # REQUESTS_PER_SECOND: 2
+      # Maximum concurrent upstream HTTP requests (default 2, minimum 1)
+      # MAX_INFLIGHT_REQUESTS: 2
       # Optional provider-side auth token:
       # AUTH_TOKEN: ${BOOKORBIT_PROVIDER_TOKEN}
 ```
@@ -33,6 +41,9 @@ cargo clippy --all-targets -- -D warnings
 | `KAKAO_REST_API_KEY` | Required | Kakao REST API key; sent as `Authorization: KakaoAK <key>` |
 | `AUTH_TOKEN` | Unset | Optional token required in the provider endpoint's `Authorization` header |
 | `USER_AGENT` | `bookorbit-kakao-provider/<version>` | Outbound HTTP User-Agent |
+| `KAKAO_API_BASE_URL` | `https://dapi.kakao.com/v3/search/book` | Kakao API endpoint. Override to use a compatible proxy or local mock server. |
+| `REQUESTS_PER_SECOND` | `2` | Maximum upstream request start rate shared by search requests. `1` means one request per second; `0` disables pacing. |
+| `MAX_INFLIGHT_REQUESTS` | `2` | Maximum concurrent upstream HTTP requests. Values below 1 are normalized to 1. |
 
 Never expose the Kakao REST API key to BookOrbit clients or log it.
 
@@ -74,4 +85,6 @@ Kakao's `status` values are display text and may change. ISBN may contain ISBN-1
 
 ## Tests
 
-Tests cover metadata mapping, identifier format and basic request parameter behavior. Run them with `cargo test`. The source should be compiled and integration-tested against the BookOrbit version being deployed, because its external-provider contract is the authoritative schema.
+Tests cover the provider HTTP route through a local mock upstream server, captured response fixtures, response mapping and upstream error translation. No test calls Kakao's production API. Run them with `cargo test`.
+
+The client spaces upstream request starts using `REQUESTS_PER_SECOND`; the default is 2 requests/second (500 ms between starts). `MAX_INFLIGHT_REQUESTS` separately caps simultaneously in-flight HTTP requests (default 2).

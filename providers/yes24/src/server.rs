@@ -48,7 +48,7 @@ async fn info(State(state): State<AppState>) -> Response {
         "idMaxLength": MAX_ID_LENGTH,
         "coverShape": "portrait",
         "color": "#E60021",
-        "rateLimit": { "maxConcurrency": 4, "minIntervalMs": 0 }
+        "rateLimit": { "maxConcurrency": state.cfg.max_inflight_requests, "minIntervalMs": if state.cfg.requests_per_second == 0 { 0 } else { (1000.0 / state.cfg.requests_per_second as f64).ceil() as u64 } }
     })).into_response()
 }
 
@@ -262,26 +262,154 @@ fn error(status: StatusCode, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 
-    #[test]
-    fn maps_yes24_sort_values() {
-        assert_eq!(map_sort("accuracy"), Some("DEFAULT"));
-        assert_eq!(map_sort("latest"), Some("RECENT"));
-        assert_eq!(map_sort("other"), None);
+    const SEARCH_FIXTURE: &str = include_str!("../testdata/response-search.json");
+    const DETAIL_FIXTURE: &str = include_str!("../testdata/response-detail-isbn13.json");
+
+    async fn mock_yes24(status: Arc<AtomicU16>, calls: Arc<AtomicUsize>) -> String {
+        let app = Router::new()
+            .route(
+                "/itemList",
+                get({
+                    let status = status.clone();
+                    let calls = calls.clone();
+                    move || {
+                        let status = status.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            let code = status.load(Ordering::SeqCst);
+                            if code != 0 {
+                                return (
+                                    StatusCode::from_u16(code).unwrap(),
+                                    Json(json!({"success":false,"message":"mock failure"})),
+                                )
+                                    .into_response();
+                            }
+                            Json(serde_json::from_str::<serde_json::Value>(SEARCH_FIXTURE).unwrap())
+                                .into_response()
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/itemDetail",
+                get({
+                    let status = status.clone();
+                    let calls = calls.clone();
+                    move || {
+                        let status = status.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            let code = status.load(Ordering::SeqCst);
+                            if code != 0 {
+                                return (
+                                    StatusCode::from_u16(code).unwrap(),
+                                    Json(json!({"success":false,"message":"mock failure"})),
+                                )
+                                    .into_response();
+                            }
+                            Json(serde_json::from_str::<serde_json::Value>(DETAIL_FIXTURE).unwrap())
+                                .into_response()
+                        }
+                    }
+                }),
+            );
+        serve(app).await
     }
 
-    fn map_sort(value: &str) -> Option<&'static str> {
-        match value {
-            "" | "accuracy" => Some("DEFAULT"),
-            "latest" => Some("RECENT"),
-            _ => None,
-        }
+    async fn serve(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
     }
 
-    #[test]
-    fn provider_id_uses_item_id() {
-        let item: Yes24Item =
-            serde_json::from_str(r#"{"itemId":12345678,"title":"test"}"#).unwrap();
-        assert_eq!(item.provider_id(), "12345678");
+    async fn get_json(url: &str) -> (StatusCode, serde_json::Value) {
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let status = response.status();
+        let body = response.json().await.unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    async fn test_provider(status: Arc<AtomicU16>, calls: Arc<AtomicUsize>) -> String {
+        let upstream = mock_yes24(status, calls).await;
+        let cfg = Arc::new(Config {
+            auth_token: None,
+            yes24_api_key: "test-key".into(),
+            user_agent: "test-agent".into(),
+            requests_per_second: 2,
+            max_inflight_requests: 2,
+        });
+        let client = Arc::new(Client::with_base_url(
+            "test-key",
+            "test-agent",
+            &upstream,
+            0,
+            2,
+        ));
+        serve(routes(cfg, client)).await
+    }
+
+    #[tokio::test]
+    async fn search_uses_local_upstream_and_maps_response() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) = get_json(&format!("{base}/search?query=%EB%AF%B8%EC%9B%80")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body["matches"].as_array().unwrap().is_empty());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "provider must call the local mock HTTP server"
+        );
+    }
+
+    #[tokio::test]
+    async fn isbn_detail_uses_local_upstream() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) = get_json(&format!("{base}/search?isbn=9791168340770")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body["matches"].as_array().unwrap().is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn lookup_fetches_detail_from_local_upstream() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) = get_json(&format!("{base}/book/116599423")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["providerId"], "116599423");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "lookup must call the local mock HTTP server"
+        );
+    }
+
+    #[tokio::test]
+    async fn upstream_error_is_mapped_to_bad_gateway() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(500)), calls.clone()).await;
+        let (status, _) = get_json(&format!("{base}/search?query=test")).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_info_exposes_contract_and_rate_limit() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) = get_json(&format!("{base}/provider/info")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["key"], "yes24");
+        assert_eq!(body["rateLimit"]["minIntervalMs"], 500);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

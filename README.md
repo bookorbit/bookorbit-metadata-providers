@@ -20,6 +20,8 @@ release.
 | [Romance.io](providers/romanceio) | Romance books from [Romance.io](https://www.romance.io): community topics, ratings and steam/spice levels | `ghcr.io/bookorbit/romanceio-provider` |
 | [Soundbooth Theater](providers/soundbooththeater) | English audiobooks from [Soundbooth Theater](https://soundbooththeater.com): narrators, series, descriptions and runtimes | `ghcr.io/bookorbit/soundbooththeater-provider` |
 | [Yandex Books](providers/yandexbooks) | Russian books, audiobooks and comics from [Yandex Books](https://books.yandex.ru): descriptions, publishers, series, genres, narrators and running times. No ISBNs, which the site does not show | `ghcr.io/bookorbit/yandexbooks-provider` |
+| [YES24](providers/yes24) | Korean books and comics from [YES24](https://www.yes24.com): descriptions, authors, publishers, series, genres, ratings and ISBNs | `ghcr.io/bookorbit/yes24-provider` |
+| [Kakao](providers/kakao) | Korean books and comics from [Kakao](https://search.daum.net/search?w=book): descriptions, authors, publishers, publication dates, covers and ISBNs | `ghcr.io/bookorbit/kakao-provider` |
 
 LubimyCzytac used to be built into BookOrbit. It keeps its old key, so the ids already on your books
 and the field rules that name it carry on once the provider is added.

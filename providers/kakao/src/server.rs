@@ -55,7 +55,7 @@ async fn info(State(state): State<AppState>) -> Response {
         "idMaxLength": MAX_ID_LENGTH,
         "coverShape": "portrait",
         "color": "#FEE500",
-        "rateLimit": { "maxConcurrency": 4, "minIntervalMs": 0 }
+        "rateLimit": { "maxConcurrency": state.cfg.max_inflight_requests, "minIntervalMs": if state.cfg.requests_per_second == 0 { 0 } else { (1000.0 / state.cfg.requests_per_second as f64).ceil() as u64 } }
     })).into_response()
 }
 
@@ -226,23 +226,129 @@ fn error(status: StatusCode, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapping::KakaoDocument;
+    use axum::extract::Query;
+    use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 
-    #[test]
-    fn isbn_search_is_mapped_to_isbn_target() {
-        let isbn = "9788996991342";
-        let query = isbn.to_string();
-        let target = "isbn";
-        assert_eq!(query, isbn);
-        assert_eq!(target, "isbn");
+    const ISBN_SUCCESS: &str = include_str!("../testdata/response-isbn-success.json");
+    const TITLE_SUCCESS: &str = include_str!("../testdata/response-title-success.json");
+
+    async fn mock_kakao(status: Arc<AtomicU16>, calls: Arc<AtomicUsize>) -> String {
+        let app = Router::new().route(
+            "/",
+            get(move |Query(_q): Query<HashMap<String, String>>| {
+                let status = status.clone();
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    let code = status.load(Ordering::SeqCst);
+                    if code != 0 {
+                        return (
+                            StatusCode::from_u16(code).unwrap(),
+                            Json(json!({"error":"mock failure"})),
+                        )
+                            .into_response();
+                    }
+                    Json(serde_json::from_str::<serde_json::Value>(TITLE_SUCCESS).unwrap())
+                        .into_response()
+                }
+            }),
+        );
+        serve(app).await
+    }
+
+    async fn serve(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    async fn get_json(url: &str) -> (StatusCode, serde_json::Value) {
+        let response = reqwest::Client::new().get(url).send().await.unwrap();
+        let status = response.status();
+        let body = response.json().await.unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    async fn test_provider(status: Arc<AtomicU16>, calls: Arc<AtomicUsize>) -> String {
+        let upstream = mock_kakao(status, calls).await;
+        let cfg = Arc::new(Config {
+            auth_token: None,
+            kakao_rest_api_key: "test-key".into(),
+            user_agent: "test-agent".into(),
+            requests_per_second: 2,
+            max_inflight_requests: 2,
+        });
+        let client = Arc::new(Client::with_base_url(
+            "test-key",
+            "test-agent",
+            &upstream,
+            0,
+            2,
+        ));
+        serve(routes(cfg, client)).await
+    }
+
+    #[tokio::test]
+    async fn search_uses_local_upstream_and_maps_response() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) = get_json(&format!(
+            "{base}/search?query=%EB%AF%B8%EC%9B%80%EB%B0%9B%EC%9D%84%20%EC%9A%A9%EA%B8%B0"
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body["matches"].as_array().unwrap().is_empty());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "provider must call the local mock HTTP server"
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_returns_cached_search_result_after_mock_search() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (_, search_body) = get_json(&format!("{base}/search?query=book")).await;
+        let id = search_body["matches"][0]["providerId"].as_str().unwrap();
+        let (status, book) = get_json(&format!("{base}/book/{id}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(book["providerId"], id);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "lookup is served from the provider cache after the mock-backed search"
+        );
+    }
+
+    #[tokio::test]
+    async fn upstream_error_is_mapped_to_bad_gateway() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(500)), calls.clone()).await;
+        let (status, _) = get_json(&format!("{base}/search?query=test")).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_info_exposes_contract_and_rate_limit() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) = get_json(&format!("{base}/provider/info")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["key"], "kakao");
+        assert_eq!(body["rateLimit"]["minIntervalMs"], 500);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
-    fn lookup_id_format_is_expected() {
-        let doc: KakaoDocument =
-            serde_json::from_str(r#"{"title":"테스트","isbn":"9781234567890"}"#).unwrap();
-        let id = doc.provider_id();
-        assert_eq!(id.len(), MAX_ID_LENGTH);
-        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()));
+    fn captured_fixtures_remain_valid() {
+        let isbn: crate::mapping::KakaoResponse = serde_json::from_str(ISBN_SUCCESS).unwrap();
+        let title: crate::mapping::KakaoResponse = serde_json::from_str(TITLE_SUCCESS).unwrap();
+        assert!(!isbn.documents.is_empty());
+        assert!(!title.documents.is_empty());
     }
 }
