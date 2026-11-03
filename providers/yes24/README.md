@@ -66,7 +66,7 @@ BookOrbit의 외부 메타데이터 프로바이더 URL은 같은 Compose 네트
 | `GET /provider/info`             | BookOrbit 프로바이더 메타데이터 |
 | `GET /search?query=클린코드`     | 상품 검색                       |
 | `GET /search?isbn=9788966260959` | ISBN으로 검색                   |
-| `GET /book/YES24-12345678`       | YES24 상품 번호로 상세 조회     |
+| `GET /book/12345678`             | YES24 상품 번호로 상세 조회     |
 
 검색 파라미터:
 

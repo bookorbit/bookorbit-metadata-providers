@@ -1,3 +1,4 @@
+mod author_normalizer;
 mod kakao;
 mod mapping;
 mod server;
@@ -22,16 +23,10 @@ async fn main() {
             .ok()
             .filter(|v| !v.trim().is_empty())
             .expect("KAKAO_REST_API_KEY must be set"),
-        user_agent: env(
-            "USER_AGENT",
-            &format!("bookorbit-kakao-provider/{VERSION}"),
-        ),
+        user_agent: env("USER_AGENT", &format!("bookorbit-kakao-provider/{VERSION}")),
     });
 
-    let client = Arc::new(kakao::Client::new(
-        &cfg.kakao_rest_api_key,
-        &cfg.user_agent,
-    ));
+    let client = Arc::new(kakao::Client::new(&cfg.kakao_rest_api_key, &cfg.user_agent));
     let app = server::routes(cfg, client);
     let listener = tokio::net::TcpListener::bind((
         "0.0.0.0",

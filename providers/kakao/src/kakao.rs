@@ -28,7 +28,10 @@ impl Client {
             .user_agent(user_agent)
             .build()
             .expect("could not build HTTP client");
-        Self { key: key.to_string(), http }
+        Self {
+            key: key.to_string(),
+            http,
+        }
     }
 
     pub async fn search(
@@ -41,33 +44,60 @@ impl Client {
     ) -> Result<KakaoResponse, UpstreamError> {
         let page = page.to_string();
         let size = size.to_string();
-        let mut request = self.http.get(API_URL)
+        let mut request = self
+            .http
+            .get(API_URL)
             .header(header::AUTHORIZATION, format!("KakaoAK {}", self.key))
-            .query(&[("query", query), ("page", page.as_str()), ("size", size.as_str())]);
-        if let Some(target) = target { request = request.query(&[("target", target)]); }
-        if let Some(sort) = sort { request = request.query(&[("sort", sort)]); }
-        let response = request.send().await.map_err(|e| UpstreamError::Failed(e.to_string()))?;
+            .query(&[
+                ("query", query),
+                ("page", page.as_str()),
+                ("size", size.as_str()),
+            ]);
+        if let Some(target) = target {
+            request = request.query(&[("target", target)]);
+        }
+        if let Some(sort) = sort {
+            request = request.query(&[("sort", sort)]);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| UpstreamError::Failed(e.to_string()))?;
         let status = response.status();
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
             return Err(UpstreamError::Unauthorized);
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
-            let retry_after_seconds = response.headers().get(header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok())
-                .filter(|v| *v > 0).unwrap_or(60);
-            return Err(UpstreamError::RateLimited { retry_after_seconds });
+            let retry_after_seconds = response
+                .headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(60);
+            return Err(UpstreamError::RateLimited {
+                retry_after_seconds,
+            });
         }
         if !status.is_success() {
-            return Err(UpstreamError::Failed(format!("Kakao API answered {status}")));
+            return Err(UpstreamError::Failed(format!(
+                "Kakao API answered {status}"
+            )));
         }
         decode_limited(response).await
     }
 }
 
-async fn decode_limited<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, UpstreamError> {
+async fn decode_limited<T: DeserializeOwned>(
+    response: reqwest::Response,
+) -> Result<T, UpstreamError> {
     let mut body = Vec::new();
     let mut stream = response;
-    while let Some(chunk) = stream.chunk().await.map_err(|e| UpstreamError::Failed(e.to_string()))? {
+    while let Some(chunk) = stream
+        .chunk()
+        .await
+        .map_err(|e| UpstreamError::Failed(e.to_string()))?
+    {
         if body.len() + chunk.len() > MAX_BODY_BYTES {
             return Err(UpstreamError::Failed("Kakao response too large".into()));
         }
@@ -76,4 +106,3 @@ async fn decode_limited<T: DeserializeOwned>(response: reqwest::Response) -> Res
     serde_json::from_slice(&body)
         .map_err(|e| UpstreamError::Failed(format!("Kakao response unreadable: {e}")))
 }
-

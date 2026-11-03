@@ -38,7 +38,9 @@ pub struct SeriesEntry {
     pub sequence: String,
 }
 
-fn is_zero(value: &u32) -> bool { *value == 0 }
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KakaoResponse {
@@ -91,12 +93,20 @@ impl KakaoDocument {
     /// Stable for the same source record. Kakao does not return a dedicated volume ID.
     pub fn provider_id(&self) -> String {
         let identity = if !self.isbn.trim().is_empty() {
-            format!("isbn:{}", self.isbn.split_whitespace().collect::<Vec<_>>().join(" "))
+            format!(
+                "isbn:{}",
+                self.isbn.split_whitespace().collect::<Vec<_>>().join(" ")
+            )
         } else if !self.url.is_empty() {
             format!("url:{}", self.url)
         } else {
-            format!("title:{}|authors:{}|publisher:{}|date:{}", self.title,
-                self.authors.join("|"), self.publisher, self.datetime)
+            format!(
+                "title:{}|authors:{}|publisher:{}|date:{}",
+                self.title,
+                self.authors.join("|"),
+                self.publisher,
+                self.datetime
+            )
         };
         let digest = Sha256::digest(identity.as_bytes());
         hex::encode(digest)
@@ -104,15 +114,24 @@ impl KakaoDocument {
 
     pub fn into_metadata(self) -> BookMetadata {
         let provider_id = self.provider_id();
-        let published_date = self.datetime.get(..10)
-            .filter(|date| date.as_bytes().get(4) == Some(&b'-') && date.as_bytes().get(7) == Some(&b'-'))
-            .unwrap_or_default().to_string();
+        let published_date = self
+            .datetime
+            .get(..10)
+            .filter(|date| {
+                date.as_bytes().get(4) == Some(&b'-') && date.as_bytes().get(7) == Some(&b'-')
+            })
+            .unwrap_or_default()
+            .to_string();
         let published_year = published_date.get(..4).unwrap_or_default().to_string();
         BookMetadata {
             media_type: "book",
             provider_id,
             title: self.title.trim().to_string(),
-            authors: self.authors.into_iter().filter(|v| !v.trim().is_empty()).collect(),
+            authors: self
+                .authors
+                .into_iter()
+                .filter(|v| !v.trim().is_empty())
+                .collect(),
             publisher: self.publisher,
             published_year,
             description: self.contents,
@@ -134,13 +153,16 @@ mod tests {
 
     #[test]
     fn maps_kakao_book_document() {
-        let doc: KakaoDocument = serde_json::from_str(r#"{
+        let doc: KakaoDocument = serde_json::from_str(
+            r#"{
             "title":"미움받을 용기", "contents":"소개", "url":"https://example.test/book",
             "isbn":"8996991341 9788996991342", "datetime":"2014-11-17T00:00:00.000+09:00",
             "authors":["기시미 이치로","고가 후미타케"], "publisher":"인플루엔셜",
             "translators":["전경아"], "price":14900, "sale_price":13410,
             "thumbnail":"https://example.test/cover", "status":"정상판매"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let book = doc.into_metadata();
         assert_eq!(book.title, "미움받을 용기");
         assert_eq!(book.authors, ["기시미 이치로", "고가 후미타케"]);
@@ -152,7 +174,8 @@ mod tests {
 
     #[test]
     fn identifier_is_stable_for_same_record() {
-        let doc: KakaoDocument = serde_json::from_str(r#"{"title":"Book","isbn":"9781234567890"}"#).unwrap();
+        let doc: KakaoDocument =
+            serde_json::from_str(r#"{"title":"Book","isbn":"9781234567890"}"#).unwrap();
         assert_eq!(doc.provider_id(), doc.clone().provider_id());
     }
 }

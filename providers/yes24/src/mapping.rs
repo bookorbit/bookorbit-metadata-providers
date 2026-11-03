@@ -38,7 +38,9 @@ pub struct BookMetadata {
     pub url: String,
 }
 
-fn is_zero(value: &u32) -> bool { *value == 0 }
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,12 +151,18 @@ impl Yes24Item {
         let description = description_parts.join("\n\n");
         // BookOrbit metadata uses a single series entry for this provider.
         // Prefer the first non-empty series from YES24's series array.
-        let first_series = self.series.into_iter()
+        let first_series = self
+            .series
+            .into_iter()
             .find(|item| !item.series_name.trim().is_empty())
             .map(|item| item.series_name.trim().to_string())
             .or_else(|| {
                 let name = self.series_name.trim();
-                if name.is_empty() { None } else { Some(name.to_string()) }
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name.to_string())
+                }
             });
         let series_name = first_series.unwrap_or_default();
 
@@ -164,10 +172,8 @@ impl Yes24Item {
             vec![self.goods_sort_nm.trim().to_string()]
         };
 
-        let (isbn13, _isbn10) = pick_isbns(
-            &[self.isbn13.clone(), self.isbn10.clone()],
-            &self.isbn13,
-        );
+        let (isbn13, _isbn10) =
+            pick_isbns(&[self.isbn13.clone(), self.isbn10.clone()], &self.isbn13);
         let isbn = if isbn13.is_empty() {
             normalize_isbn(&self.isbn10)
         } else {
@@ -221,15 +227,18 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = Option::<serde_json::Value>::deserialize(deserializer)?;
-    Ok(value.and_then(|value| match value {
-        serde_json::Value::Number(number) => number.as_f64(),
-        serde_json::Value::String(text) => text.trim().parse::<f64>().ok(),
-        _ => None,
-    }).filter(|score| score.is_finite()))
+    Ok(value
+        .and_then(|value| match value {
+            serde_json::Value::Number(number) => number.as_f64(),
+            serde_json::Value::String(text) => text.trim().parse::<f64>().ok(),
+            _ => None,
+        })
+        .filter(|score| score.is_finite()))
 }
 
 fn normalize_isbn(value: &str) -> String {
-    value.chars()
+    value
+        .chars()
         .filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x')
         .map(|c| c.to_ascii_uppercase())
         .collect()
@@ -244,7 +253,9 @@ fn to_isbn13(isbn: &str) -> String {
         return String::new();
     }
     let mut digits = format!("978{}", &isbn[..9]);
-    let sum: u32 = digits.chars().enumerate()
+    let sum: u32 = digits
+        .chars()
+        .enumerate()
         .map(|(index, ch)| ch.to_digit(10).unwrap_or(0) * if index % 2 == 0 { 1 } else { 3 })
         .sum();
     digits.push(char::from_digit((10 - sum % 10) % 10, 10).unwrap());
@@ -253,17 +264,20 @@ fn to_isbn13(isbn: &str) -> String {
 
 fn list_contains_isbn(valid: &[String], preferred: &str) -> bool {
     let preferred = normalize_isbn(preferred);
-    valid.iter().any(|candidate| {
-        candidate == &preferred || to_isbn13(candidate) == to_isbn13(&preferred)
-    })
+    valid
+        .iter()
+        .any(|candidate| candidate == &preferred || to_isbn13(candidate) == to_isbn13(&preferred))
 }
 
 /// Prefer the ISBN the client searched for when it identifies the same edition, while returning
 /// the corresponding ISBN-13 and only its matching ISBN-10.
 fn pick_isbns(list: &[String], preferred: &str) -> (String, String) {
-    let valid: Vec<String> = list.iter()
+    let valid: Vec<String> = list
+        .iter()
         .map(|candidate| normalize_isbn(candidate))
-        .filter(|isbn| isbn.len() == 10 || (isbn.len() == 13 && isbn.chars().all(|c| c.is_ascii_digit())))
+        .filter(|isbn| {
+            isbn.len() == 10 || (isbn.len() == 13 && isbn.chars().all(|c| c.is_ascii_digit()))
+        })
         .collect();
     let preferred = normalize_isbn(preferred);
     let mut isbn13 = String::new();
@@ -277,7 +291,8 @@ fn pick_isbns(list: &[String], preferred: &str) -> (String, String) {
             isbn13 = to_isbn13(first);
         }
     }
-    let isbn10 = valid.iter()
+    let isbn10 = valid
+        .iter()
         .find(|isbn| isbn.len() == 10 && !isbn13.is_empty() && to_isbn13(isbn) == isbn13)
         .cloned()
         .unwrap_or_default();
@@ -297,10 +312,13 @@ fn normalize_date(value: &str) -> String {
 
 fn split_authors(value: &str) -> Vec<String> {
     let value = value.trim();
-    if value.is_empty() { return Vec::new(); }
+    if value.is_empty() {
+        return Vec::new();
+    }
     // YES24 combines contributors and their roles in one string, often separated by '/'.
     // Split explicit separators while retaining role labels such as '저', '그림', and '역'.
-    value.split([',', ';', '|', '/', '\n'])
+    value
+        .split([',', ';', '|', '/', '\n'])
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .map(str::to_string)
@@ -308,7 +326,10 @@ fn split_authors(value: &str) -> Vec<String> {
 }
 
 fn push_section(parts: &mut Vec<String>, label: &str, value: Option<String>) {
-    if let Some(value) = value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+    if let Some(value) = value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
         parts.push(format!("{label}\n{value}"));
     }
 }
@@ -365,7 +386,10 @@ mod tests {
 
     #[test]
     fn handles_null_extended_fields_and_missing_item_id() {
-        let item: Yes24Item = serde_json::from_str(r#"{"title":"테스트","author":"A, B","contentDetail":null,"series":[]}"#).unwrap();
+        let item: Yes24Item = serde_json::from_str(
+            r#"{"title":"테스트","author":"A, B","contentDetail":null,"series":[]}"#,
+        )
+        .unwrap();
         let book = item.into_metadata();
         assert_eq!(book.authors, ["A", "B"]);
         assert!(book.description.is_empty());
