@@ -64,8 +64,8 @@ yes24-provider:
     # 선택 사항: BookOrbit 외부 프로바이더 요청도 보호할 때 사용
     # AUTH_TOKEN: ${BOOKORBIT_PROVIDER_TOKEN}
     # 선택 사항: BookOrbit이 동일 네트워크 안에 있지 않은 경우 사용
-  ports:
-    - "8081:8080"
+  # ports:
+  #   - "8081:8080"
 ```
 
 BookOrbit의 외부 메타데이터 프로바이더 URL은 같은 Compose 네트워크라면 `http://bookorbit-yes24-provider:8080`을 사용합니다. `YES24_API_KEY`는 Compose를 실행하는 디렉터리의 `.env`에 추가하거나 기존 환경변수 공급 방식을 사용하세요.

@@ -65,20 +65,20 @@ yes24-provider:
     # MAX_INFLIGHT_REQUESTS: 2
     # Optional: protect requests coming into this provider from BookOrbit
     # AUTH_TOKEN: ${BOOKORBIT_PROVIDER_TOKEN}
-  ports:
-    - "8081:8080"
+  # ports:
+  #   - "8081:8080"
 ```
 
 If BookOrbit and this provider share a Compose network, configure the external provider URL in BookOrbit as `http://bookorbit-yes24-provider:8080`. Add `YES24_API_KEY` to the `.env` file in the Compose working directory or use your existing environment-variable management method.
 
 ## Endpoints
 
-| Route | Description |
-|---|---|
-| `GET /provider/info` | BookOrbit provider metadata |
-| `GET /search?query=clean-code` | Search products |
-| `GET /search?isbn=9788966260959` | Search by ISBN |
-| `GET /book/12345678` | Retrieve details by YES24 item ID |
+| Route                            | Description                       |
+| -------------------------------- | --------------------------------- |
+| `GET /provider/info`             | BookOrbit provider metadata       |
+| `GET /search?query=clean-code`   | Search products                   |
+| `GET /search?isbn=9788966260959` | Search by ISBN                    |
+| `GET /book/12345678`             | Retrieve details by YES24 item ID |
 
 Search parameters:
 
