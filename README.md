@@ -14,6 +14,7 @@ release.
 | [Douban](providers/douban) | Chinese books from [book.douban.com](https://book.douban.com): titles, authors, publishers, ratings, ISBN lookups. No covers, which Douban serves only to its own pages | `ghcr.io/bookorbit/douban-provider` |
 | [FantLab](providers/fantlab) | Russian-language science fiction and fantasy from [fantlab.ru](https://fantlab.ru): works, editions by ISBN, series, genres, ratings | `ghcr.io/bookorbit/fantlab-provider` |
 | [J-Novel Club](providers/jnovelclub) | Light novels and manga published in English by [J-Novel Club](https://j-novel.club), with the volume number taken from the file's title | `ghcr.io/bookorbit/jnovelclub-provider` |
+| [Kakao](providers/kakao) | Korean books and comics from [Kakao](https://search.daum.net/search?w=book): descriptions, authors, publishers, publication dates, covers and ISBNs | `ghcr.io/bookorbit/kakao-provider` |
 | [Libris](providers/libris) | Swedish books from [Libris](https://libris.kb.se), the National Library of Sweden's catalogue | `ghcr.io/bookorbit/libris-provider` |
 | [LubimyCzytac](providers/lubimyczytac) | Polish books from [lubimyczytac.pl](https://lubimyczytac.pl): titles, authors, series, genres | `ghcr.io/bookorbit/lubimyczytac-provider` |
 | [MangaBaka](providers/mangabaka) | Manga, manhwa, manhua and light novels from [mangabaka.org](https://mangabaka.org), with the volume number taken from the file's title | `ghcr.io/bookorbit/mangabaka-provider` |
@@ -21,7 +22,6 @@ release.
 | [Soundbooth Theater](providers/soundbooththeater) | English audiobooks from [Soundbooth Theater](https://soundbooththeater.com): narrators, series, descriptions and runtimes | `ghcr.io/bookorbit/soundbooththeater-provider` |
 | [Yandex Books](providers/yandexbooks) | Russian books, audiobooks and comics from [Yandex Books](https://books.yandex.ru): descriptions, publishers, series, genres, narrators and running times. No ISBNs, which the site does not show | `ghcr.io/bookorbit/yandexbooks-provider` |
 | [YES24](providers/yes24) | Korean books and comics from [YES24](https://www.yes24.com): descriptions, authors, publishers, series, genres, ratings and ISBNs | `ghcr.io/bookorbit/yes24-provider` |
-| [Kakao](providers/kakao) | Korean books and comics from [Kakao](https://search.daum.net/search?w=book): descriptions, authors, publishers, publication dates, covers and ISBNs | `ghcr.io/bookorbit/kakao-provider` |
 
 LubimyCzytac used to be built into BookOrbit. It keeps its old key, so the ids already on your books
 and the field rules that name it carry on once the provider is added.
