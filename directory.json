@@ -171,6 +171,42 @@
       "languages": [
         "ru"
       ]
+    },
+    {
+      "key": "yes24",
+      "name": "YES24",
+      "summary": "Korean books and comics from YES24: titles, covers, authors, publishers, descriptions, series, genres, pages, publication dates, ratings and ISBNs.",
+      "image": "ghcr.io/bookorbit/yes24-provider",
+      "version": "0.1.0",
+      "port": 8080,
+      "docsUrl": "https://github.com/bookorbit/bookorbit-metadata-providers/tree/main/providers/yes24",
+      "homepage": "https://www.yes24.com",
+      "color": "#0080ff",
+      "mediaTypes": [
+        "book",
+        "comic"
+      ],
+      "languages": [
+        "ko"
+      ]
+    },
+    {
+      "key": "kakao",
+      "name": "Kakao",
+      "summary": "Korean books and comics from Kakao: titles, covers, authors, publishers, descriptions, publication dates, ISBNs.",
+      "image": "ghcr.io/bookorbit/kakao-provider",
+      "version": "0.1.0",
+      "port": 8080,
+      "docsUrl": "https://github.com/bookorbit/bookorbit-metadata-providers/tree/main/providers/kakao",
+      "homepage": "https://developers.kakao.com",
+      "color": "#fee500",
+      "mediaTypes": [
+        "book",
+        "comic"
+      ],
+      "languages": [
+        "ko"
+      ]
     }
   ]
 }
