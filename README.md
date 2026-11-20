@@ -14,6 +14,7 @@ release.
 | [Douban](providers/douban) | Chinese books from [book.douban.com](https://book.douban.com): titles, authors, publishers, ratings, ISBN lookups. No covers, which Douban serves only to its own pages | `ghcr.io/bookorbit/douban-provider` |
 | [FantLab](providers/fantlab) | Russian-language science fiction and fantasy from [fantlab.ru](https://fantlab.ru): works, editions by ISBN, series, genres, ratings | `ghcr.io/bookorbit/fantlab-provider` |
 | [J-Novel Club](providers/jnovelclub) | Light novels and manga published in English by [J-Novel Club](https://j-novel.club), with the volume number taken from the file's title | `ghcr.io/bookorbit/jnovelclub-provider` |
+| [Kakao](providers/kakao) | Korean books and comics from [Kakao](https://search.daum.net/search?w=book): descriptions, authors, publishers, publication dates, covers and ISBNs | `ghcr.io/bookorbit/kakao-provider` |
 | [Libris](providers/libris) | Swedish books from [Libris](https://libris.kb.se), the National Library of Sweden's catalogue | `ghcr.io/bookorbit/libris-provider` |
 | [LubimyCzytac](providers/lubimyczytac) | Polish books from [lubimyczytac.pl](https://lubimyczytac.pl): titles, authors, series, genres | `ghcr.io/bookorbit/lubimyczytac-provider` |
 | [MangaBaka](providers/mangabaka) | Manga, manhwa, manhua and light novels from [mangabaka.org](https://mangabaka.org), with the volume number taken from the file's title | `ghcr.io/bookorbit/mangabaka-provider` |
