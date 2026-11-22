@@ -43,7 +43,7 @@ async fn info(State(state): State<AppState>) -> Response {
         "key": "yes24",
         "mediaTypes": ["book", "comic"],
         "lookup": true,
-        "supportedFields": ["title", "subtitle", "description", "authors", "publisher", "isbn", "publishedYear", "language", "pageCount", "seriesName", "communityRating", "genres"],
+        "supportedFields": ["title", "subtitle", "description", "cover", "authors", "publisher", "isbn", "publishedYear", "publishedDate", "pageCount", "seriesName", "communityRating", "genres"],
         "searchParams": ["isbn", "language", "limit"],
         "idMaxLength": MAX_ID_LENGTH,
         "coverShape": "portrait",
@@ -162,6 +162,7 @@ async fn search(
             };
             let mut items: Vec<Yes24Item> = items
                 .into_iter()
+                .filter(Yes24Item::is_supported_media)
                 .filter(|item| {
                     publisher_filter.is_empty()
                         || item.publisher.to_lowercase().contains(&publisher_filter)
@@ -218,7 +219,8 @@ async fn lookup(
         .await
         .unwrap_or_else(|_| Err(UpstreamError::Failed("request timed out".into())));
     match result {
-        Ok(Some(item)) => Json(item.into_metadata()).into_response(),
+        Ok(Some(item)) if item.is_supported_media() => Json(item.into_metadata()).into_response(),
+        Ok(Some(_)) => error(StatusCode::NOT_FOUND, "Unsupported media type"),
         Ok(None) | Err(UpstreamError::NotFound) => error(StatusCode::NOT_FOUND, "Book not found"),
         Err(err) => upstream_error("lookup", err),
     }
@@ -416,6 +418,14 @@ mod tests {
         let (status, body) = get_json(&format!("{base}/provider/info")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["key"], "yes24");
+        assert!(body["supportedFields"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("cover")));
+        assert!(!body["supportedFields"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("language")));
         assert_eq!(body["rateLimit"]["minIntervalMs"], 500);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }

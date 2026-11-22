@@ -99,11 +99,11 @@ Search requests set `detail=Y` to map the extended information YES24 makes avail
 - `title`: Product title; when a subtitle exists, the format is `Title: Subtitle`.
 - `authors`: Writer names only; translators and reviewers are excluded, and illustrator credits are excluded when a writer is present.
 - `description`: Plain-text book introduction, falling back to the summary. HTML tags are stripped and the table of contents is omitted.
-- `cover`: Cover image URL.
+- `cover`: Prefer the larger `/XL` image variant when the source URL uses `/L`; preserve other URLs.
 - `publishedDate` / `publishedYear`: Extracted from the publication date.
 - `series`: `[{ "series": "...", "sequence": "" }]` in the BookOrbit contract format.
-- `pages`, `rating`, `languageCode`: Mapped to BookOrbit field names. YES24's 0-10 star score is converted to a 0-5 rating.
-- `mediaType`: `comic` for YES24 goods marked `만화`; otherwise `book`.
+- `pages`, `rating`: Mapped to BookOrbit field names. YES24's 0-10 star score is converted to a 0-5 rating. `languageCode` is omitted because YES24 does not provide edition-level language.
+- `mediaType`: `comic` when the goods type or category identifies comics; otherwise `book`. Unsupported audiobooks are omitted.
 - `url`: YES24 product URL.
 
 ## Request rate limiting

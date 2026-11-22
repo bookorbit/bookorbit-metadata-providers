@@ -28,7 +28,8 @@ pub struct BookMetadata {
     pub rating: Option<f64>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub isbn: String,
-    pub language_code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<&'static str>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub published_date: String,
     #[serde(skip_serializing_if = "is_zero")]
@@ -137,6 +138,11 @@ pub struct Yes24Series {
 }
 
 impl Yes24Item {
+    pub fn is_supported_media(&self) -> bool {
+        let category = format!("{} {}", self.goods_type, self.goods_sort_nm);
+        !category.contains("오디오북")
+    }
+
     pub fn provider_id(&self) -> String {
         // BookOrbit stores the provider's native ID, without a provider-name prefix.
         // YES24 exposes this stable numeric identifier as itemId.
@@ -196,7 +202,10 @@ impl Yes24Item {
             isbn13
         };
 
-        let media_type = if self.goods_type.contains("만화") {
+        let category = format!("{} {}", self.goods_type, self.goods_sort_nm);
+        let media_type = if category.contains("만화")
+            && !category.contains("국내도서-만화/라이트노벨-라이트노벨")
+        {
             "comic"
         } else {
             "book"
@@ -211,15 +220,14 @@ impl Yes24Item {
             publisher: self.publisher.trim().to_string(),
             published_year,
             description,
-            cover: self.cover,
+            cover: prefer_large_cover(&self.cover),
             genres,
             series,
             pages: self.pages,
             rating,
             isbn,
-            // YES24's Goods API does not document a language field. The provider defaults to Korean,
-            // matching the existing BookOrbit Kakao provider's behavior.
-            language_code: "ko",
+            // YES24 does not provide edition-level language metadata.
+            language_code: None,
             published_date,
             cover_width: 0,
             cover_height: 0,
@@ -323,6 +331,9 @@ fn pick_isbns(list: &[String], preferred: &str) -> (String, String) {
 
 fn normalize_date(value: &str) -> String {
     let value = value.trim();
+    if value.len() == 8 && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return format!("{}-{}-{}", &value[..4], &value[4..6], &value[6..8]);
+    }
     if value.len() >= 10 {
         let date = &value[..10];
         if date.as_bytes().get(4) == Some(&b'-') && date.as_bytes().get(7) == Some(&b'-') {
@@ -330,6 +341,15 @@ fn normalize_date(value: &str) -> String {
         }
     }
     value.to_string()
+}
+
+fn prefer_large_cover(value: &str) -> String {
+    let value = value.trim();
+    if let Some(base) = value.strip_suffix("/L") {
+        format!("{base}/XL")
+    } else {
+        value.to_string()
+    }
 }
 
 fn split_authors(value: &str) -> Vec<String> {
@@ -412,6 +432,12 @@ mod tests {
         assert_eq!(book.subtitle, "애자일 소프트웨어 장인 정신");
         assert_eq!(book.authors, ["로버트 C. 마틴"]);
         assert_eq!(book.published_date, "2013-12-24");
+        assert_eq!(book.language_code, None);
+        assert!(serde_json::to_value(&book)
+            .unwrap()
+            .get("languageCode")
+            .is_none());
+        assert_eq!(book.cover, "https://image.yes24.com/goods/12345678/XL");
         assert_eq!(book.published_year, "2013");
         assert_eq!(book.description, "소개");
         assert_eq!(book.series[0].series, "마틴 파울러 시리즈");
@@ -423,6 +449,60 @@ mod tests {
         assert_eq!(book.rating, Some(4.6));
         assert_eq!(book.isbn, "9788966260959");
         assert_eq!(book.genres, ["컴퓨터/IT"]);
+    }
+
+    #[test]
+    fn captured_item_116599423_maps_compact_date_and_xl_cover() {
+        for fixture in [
+            include_str!("../testdata/response-search.json"),
+            include_str!("../testdata/response-detail-ItemId.json"),
+            include_str!("../testdata/response-detail-isbn13.json"),
+        ] {
+            let envelope: Yes24Envelope = serde_json::from_str(fixture).unwrap();
+            let item = envelope
+                .data
+                .items
+                .into_iter()
+                .find(|item| item.item_id == 116599423)
+                .unwrap();
+            let book = item.into_metadata();
+            assert_eq!(book.published_date, "2022-12-28");
+            assert_eq!(book.published_year, "2022");
+            assert_eq!(book.cover, "https://image.yes24.com/goods/116599423/XL");
+        }
+    }
+
+    #[test]
+    fn normalizes_compact_dates_and_preserves_iso_dates() {
+        assert_eq!(normalize_date("20221228"), "2022-12-28");
+        assert_eq!(normalize_date("2022-12-28"), "2022-12-28");
+    }
+
+    #[test]
+    fn prefers_xl_cover_and_preserves_other_urls() {
+        assert_eq!(
+            prefer_large_cover("https://image.yes24.com/goods/116599423/L"),
+            "https://image.yes24.com/goods/116599423/XL"
+        );
+        assert_eq!(
+            prefer_large_cover("https://example.com/cover.jpg"),
+            "https://example.com/cover.jpg"
+        );
+    }
+
+    #[test]
+    fn classifies_comics_and_omits_audiobooks() {
+        let comic: Yes24Item = serde_json::from_str(
+            r#"{"itemId":183793937,"goodsType":"eBook","goodsSortNm":"eBook-만화"}"#,
+        )
+        .unwrap();
+        let audiobook: Yes24Item = serde_json::from_str(
+            r#"{"itemId":178395884,"goodsType":"오디오북","goodsSortNm":"오디오북"}"#,
+        )
+        .unwrap();
+        assert!(comic.is_supported_media());
+        assert_eq!(comic.into_metadata().media_type, "comic");
+        assert!(!audiobook.is_supported_media());
     }
 
     #[test]

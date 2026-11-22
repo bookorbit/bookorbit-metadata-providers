@@ -98,11 +98,11 @@ BookOrbit의 외부 메타데이터 프로바이더 URL은 같은 Compose 네트
 - `title`: 제목. 부제목이 있으면 `제목: 부제목` 형식
 - `authors`: 저자만 포함하며 번역자와 감수자는 제외합니다. 저자가 있을 때 삽화 담당자도 제외합니다.
 - `description`: HTML을 제거한 일반 텍스트 도서 소개를 사용하고, 소개가 없으면 줄거리를 사용합니다. 목차는 제외합니다.
-- `cover`: 커버 이미지 URL
+- `cover`: 원본 URL이 `/L`이면 더 큰 `/XL` 이미지 URL을 우선 사용하고, 그 외 URL은 유지합니다.
 - `publishedDate` / `publishedYear`: 출간일에서 추출
 - `series`: BookOrbit 계약 형식인 `[{ "series": "...", "sequence": "" }]`로 매핑
-- `pages`, `rating`, `languageCode`: BookOrbit 필드명으로 제공합니다. YES24의 0~10점 별점은 0~5점으로 변환합니다.
-- `mediaType`: YES24 상품 유형이 `만화`이면 `comic`, 그 외에는 `book`
+- `pages`, `rating`: BookOrbit 필드명으로 제공합니다. YES24의 0~10점 별점은 0~5점으로 변환합니다. 판본별 언어 정보가 없어 `languageCode`는 생략합니다.
+- `mediaType`: 상품 유형 또는 관리 분류가 만화이면 `comic`, 그 외에는 `book`으로 분류합니다. 지원하지 않는 오디오북은 결과에서 제외합니다.
 - `url`: YES24 상품 링크
 
 ## 요청 속도 제한
