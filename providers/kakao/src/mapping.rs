@@ -211,7 +211,7 @@ fn is_valid_isbn10(value: &str) -> bool {
             digit * (10 - i as u32)
         })
         .sum();
-    sum % 11 == 0
+    sum.is_multiple_of(11)
 }
 
 fn is_valid_isbn13(value: &str) -> bool {
