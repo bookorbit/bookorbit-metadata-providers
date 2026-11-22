@@ -19,7 +19,8 @@ pub struct BookMetadata {
     pub genres: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub series: Vec<SeriesEntry>,
-    pub language_code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<&'static str>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub isbn13: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -127,7 +128,7 @@ impl KakaoDocument {
             cover,
             genres: Vec::new(),
             series: Vec::new(),
-            language_code: "ko",
+            language_code: None,
             isbn13,
             isbn10,
             published_date,
@@ -151,18 +152,82 @@ fn split_isbns(value: &str) -> (String, String) {
             .map(|character| character.to_ascii_uppercase())
             .collect();
         match normalized.len() {
-            13 if normalized
-                .chars()
-                .all(|character| character.is_ascii_digit()) =>
-            {
-                isbn13 = normalized;
-            }
-            10 => isbn10 = normalized,
+            13 if is_valid_isbn(&normalized) => isbn13 = normalized,
+            10 if is_valid_isbn(&normalized) => isbn10 = normalized,
             _ => {}
         }
     }
 
     (isbn13, isbn10)
+}
+
+pub fn normalize_isbn(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x')
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
+}
+
+pub fn is_valid_isbn(value: &str) -> bool {
+    let normalized = normalize_isbn(value);
+    if is_placeholder_isbn(&normalized) {
+        return false;
+    }
+    match normalized.len() {
+        10 => is_valid_isbn10(&normalized),
+        13 => is_valid_isbn13(&normalized),
+        _ => false,
+    }
+}
+
+fn is_placeholder_isbn(value: &str) -> bool {
+    if value.len() == 10 {
+        value[..9].bytes().all(|byte| byte == b'0')
+    } else if value.len() == 13 {
+        matches!(&value[..3], "978" | "979") && value[3..12].bytes().all(|byte| byte == b'0')
+    } else {
+        false
+    }
+}
+
+fn is_valid_isbn10(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || !bytes[..9].iter().all(|byte| byte.is_ascii_digit())
+        || !(bytes[9].is_ascii_digit() || bytes[9] == b'X')
+    {
+        return false;
+    }
+    let sum: u32 = bytes
+        .iter()
+        .enumerate()
+        .map(|(i, byte)| {
+            let digit = if *byte == b'X' {
+                10
+            } else {
+                (*byte - b'0') as u32
+            };
+            digit * (10 - i as u32)
+        })
+        .sum();
+    sum % 11 == 0
+}
+
+fn is_valid_isbn13(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 13
+        || !matches!(&value[..3], "978" | "979")
+        || !bytes.iter().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let sum: u32 = bytes[..12]
+        .iter()
+        .enumerate()
+        .map(|(i, byte)| (*byte - b'0') as u32 * if i % 2 == 0 { 1 } else { 3 })
+        .sum();
+    (10 - sum % 10) % 10 == (bytes[12] - b'0') as u32
 }
 
 #[cfg(test)]
@@ -189,6 +254,11 @@ mod tests {
         assert_eq!(book.provider_id, "9788996991342");
         assert_eq!(book.isbn10, "8996991341");
         assert_eq!(book.isbn13, "9788996991342");
+        assert_eq!(book.language_code, None);
+        assert!(serde_json::to_value(&book)
+            .unwrap()
+            .get("languageCode")
+            .is_none());
         assert_eq!(
             book.cover,
             "http://t1.daumcdn.net/lbook/image/1467038?timestamp=20230128141840"
@@ -196,10 +266,40 @@ mod tests {
     }
 
     #[test]
+    fn rejects_all_zero_fixture_documents() {
+        let response: KakaoResponse =
+            serde_json::from_str(include_str!("../testdata/response-isbn-all0s.json")).unwrap();
+        assert_eq!(
+            response
+                .documents
+                .into_iter()
+                .filter_map(KakaoDocument::into_metadata)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn rejects_placeholder_and_invalid_isbns() {
+        assert!(!is_valid_isbn("0000000000"));
+        assert!(!is_valid_isbn("9780000000002"));
+        assert!(!is_valid_isbn("9781234567890"));
+        assert!(!is_valid_isbn("9778996991342"));
+        assert!(is_valid_isbn("9788996991342"));
+        assert_eq!(
+            split_isbns("0000000000 9781234567890"),
+            (String::new(), String::new())
+        );
+        let invalid: KakaoDocument =
+            serde_json::from_str(r#"{"title":"Invalid","isbn":"9781234567890"}"#).unwrap();
+        assert!(invalid.into_metadata().is_none());
+    }
+
+    #[test]
     fn identifier_is_stable_for_same_record() {
         let doc: KakaoDocument =
-            serde_json::from_str(r#"{"title":"Book","isbn":"9781234567890"}"#).unwrap();
-        assert_eq!(doc.into_metadata().unwrap().provider_id, "9781234567890");
+            serde_json::from_str(r#"{"title":"Book","isbn":"9788996991342"}"#).unwrap();
+        assert_eq!(doc.into_metadata().unwrap().provider_id, "9788996991342");
     }
 }
 

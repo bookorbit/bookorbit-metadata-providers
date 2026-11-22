@@ -35,46 +35,47 @@ cargo clippy --all-targets -- -D warnings
 
 ## Configuration
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `8080` | HTTP server port |
-| `KAKAO_REST_API_KEY` | Required | Kakao REST API key; sent as `Authorization: KakaoAK <key>` |
-| `AUTH_TOKEN` | Unset | Optional token required in the provider endpoint's `Authorization` header |
-| `USER_AGENT` | `bookorbit-kakao-provider/<version>` | Outbound HTTP User-Agent |
-| `KAKAO_API_BASE_URL` | `https://dapi.kakao.com/v3/search/book` | Kakao API endpoint. Override to use a compatible proxy or local mock server. |
-| `REQUESTS_PER_SECOND` | `2` | Maximum upstream request start rate shared by search requests. `1` means one request per second; `0` disables pacing. |
-| `MAX_INFLIGHT_REQUESTS` | `2` | Maximum concurrent upstream HTTP requests. Values below 1 are normalized to 1. |
+| Variable                | Default                                 | Description                                                                                                           |
+| ----------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                  | `8080`                                  | HTTP server port                                                                                                      |
+| `KAKAO_REST_API_KEY`    | Required                                | Kakao REST API key; sent as `Authorization: KakaoAK <key>`                                                            |
+| `AUTH_TOKEN`            | Unset                                   | Optional token required in the provider endpoint's `Authorization` header                                             |
+| `USER_AGENT`            | `bookorbit-kakao-provider/<version>`    | Outbound HTTP User-Agent                                                                                              |
+| `KAKAO_API_BASE_URL`    | `https://dapi.kakao.com/v3/search/book` | Kakao API endpoint. Override to use a compatible proxy or local mock server.                                          |
+| `REQUESTS_PER_SECOND`   | `2`                                     | Maximum upstream request start rate shared by search requests. `1` means one request per second; `0` disables pacing. |
+| `MAX_INFLIGHT_REQUESTS` | `2`                                     | Maximum concurrent upstream HTTP requests. Values below 1 are normalized to 1.                                        |
 
 Never expose the Kakao REST API key to BookOrbit clients or log it.
 
 ## Endpoints
 
-| Route | Description |
-|---|---|
-| `GET /provider/info` | Provider metadata and supported fields |
-| `GET /search?query=&limit=&author=&target=&sort=&page=` | Search books |
-| `GET /search?isbn=` | Search by ISBN (`target=isbn` is applied automatically) |
-| `GET /book/{id}` | Retrieve a book by ISBN |
+| Route                                                   | Description                                             |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| `GET /provider/info`                                    | Provider metadata and supported fields                  |
+| `GET /search?query=&limit=&author=&target=&sort=&page=` | Search books                                            |
+| `GET /search?isbn=`                                     | Search by ISBN (`target=isbn` is applied automatically) |
+| `GET /book/{id}`                                        | Retrieve a book by ISBN                                 |
 
 `limit` defaults to 5 and is capped at 20. `target` accepts `title`, `isbn`, `publisher` or `person`; `sort` accepts `accuracy` or `latest`; `page` is clamped to Kakao's supported range of 1–50. When `isbn` is supplied, it takes precedence over `query`. Kakao's `size` is set from the provider result limit.
 
 ## Metadata mapping
 
-| BookOrbit field | Kakao field | Notes |
-|---|---|---|
-| `title` | `title` | Book title |
-| `description` | `contents` | Description |
-| `url` | `url` | Daum book detail URL |
-| `authors` | `authors` | Authors only; translators remain separate in the upstream response |
-| `publisher` | `publisher` | Publisher name |
-| `publishedDate` | `datetime` | ISO 8601 timestamp converted to `YYYY-MM-DD` |
-| `publishedYear` | `datetime` | First four digits of the publication date |
-| `cover` | `thumbnail` | Largest cover URL extracted from the thumbnail `fname` parameter |
-| `languageCode` | Provider default | Set to `ko` as a provider-level default |
-| `isbn13` / `isbn10` | `isbn` | Split into ISBN-13 and ISBN-10 when present |
-| `providerId` | `isbn13` or `isbn10` | ISBN-13 is preferred; records without an ISBN are omitted |
+| BookOrbit field     | Kakao field          | Notes                                                              |
+| ------------------- | -------------------- | ------------------------------------------------------------------ |
+| `title`             | `title`              | Book title                                                         |
+| `description`       | `contents`           | Description                                                        |
+| `url`               | `url`                | Daum book detail URL                                               |
+| `authors`           | `authors`            | Authors only; translators remain separate in the upstream response |
+| `publisher`         | `publisher`          | Publisher name                                                     |
+| `publishedDate`     | `datetime`           | ISO 8601 timestamp converted to `YYYY-MM-DD`                       |
+| `publishedYear`     | `datetime`           | First four digits of the publication date                          |
+| `cover`             | `thumbnail`          | Largest cover URL extracted from the thumbnail `fname` parameter   |
+| `isbn13` / `isbn10` | `isbn`               | Split into ISBN-13 and ISBN-10 when present                        |
+| `providerId`        | `isbn13` or `isbn10` | ISBN-13 is preferred; records without an ISBN are omitted          |
 
 Series and genres are not populated because the documented Kakao response does not provide reliable fields for them. Price, sale price, translators and status are available upstream but are not part of the current BookOrbit metadata struct.
+
+Kakao only supports the book media type. Although manga may appear in search results, Kakao does not provide a separate media type or distinguishing data for manga. Therefore, all search results, including manga, are classified as book. Additionally, languageCode is omitted because language information for individual editions is not provided.
 
 ## Lookup behavior and limitations
 

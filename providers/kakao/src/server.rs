@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::author_normalizer::{author_names_match, normalize_author_query};
 use crate::kakao::{Client, UpstreamError};
-use crate::mapping::{BookMetadata, KakaoDocument};
+use crate::mapping::{is_valid_isbn, normalize_isbn, BookMetadata, KakaoDocument};
 use crate::{Config, VERSION};
 
 const DEFAULT_LIMIT: usize = 5;
@@ -44,7 +44,7 @@ async fn info(State(state): State<AppState>) -> Response {
         "key": "kakao",
         "mediaTypes": ["book"],
         "lookup": true,
-        "supportedFields": ["title", "description", "cover", "authors", "publisher", "publishedYear", "language", "isbn"],
+        "supportedFields": ["title", "description", "cover", "authors", "publisher", "publishedYear", "publishedDate", "isbn"],
         "searchParams": ["isbn", "language", "limit"],
         "idMaxLength": MAX_ID_LENGTH,
         "coverShape": "portrait",
@@ -72,17 +72,14 @@ async fn search(
     let title_query = param("query").to_string();
     let isbn = param("isbn");
     let isbn_first = !isbn.is_empty();
-    let normalized_isbn: String = isbn
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x')
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
-    let mut query = if isbn_first {
-        isbn.to_string()
+    let normalized_isbn = normalize_isbn(isbn);
+    let isbn_usable = isbn_first && is_valid_isbn(&normalized_isbn);
+    let mut query = if isbn_usable {
+        normalized_isbn.clone()
     } else {
         title_query.clone()
     };
-    let target = if isbn_first {
+    let target = if isbn_usable {
         "isbn".to_string()
     } else {
         param("target").to_string()
@@ -131,7 +128,7 @@ async fn search(
                 .into_iter()
                 .filter_map(KakaoDocument::into_metadata)
                 .filter(|book| {
-                    !isbn_first || book.isbn13 == normalized_isbn || book.isbn10 == normalized_isbn
+                    !isbn_usable || book.isbn13 == normalized_isbn || book.isbn10 == normalized_isbn
                 })
                 .collect();
             if !author_filter.is_empty() {
@@ -142,19 +139,22 @@ async fn search(
                         .any(|author| author_names_match(author, &author_filter))
                 });
             }
-            if matches.is_empty() && isbn_first && !title_query.is_empty() {
+            if matches.is_empty() && isbn_usable && !title_query.is_empty() {
                 let fallback = tokio::time::timeout(
                     REQUEST_TIMEOUT,
                     state.kakao.search(&title_query, None, sort, page, size),
                 )
                 .await
                 .unwrap_or_else(|_| Err(UpstreamError::Failed("request timed out".into())));
-                if let Ok(response) = fallback {
-                    matches = response
-                        .documents
-                        .into_iter()
-                        .filter_map(KakaoDocument::into_metadata)
-                        .collect();
+                match fallback {
+                    Ok(response) => {
+                        matches = response
+                            .documents
+                            .into_iter()
+                            .filter_map(KakaoDocument::into_metadata)
+                            .collect();
+                    }
+                    Err(err) => return upstream_error("search fallback", err),
                 }
             }
             matches.truncate(limit);
@@ -181,11 +181,7 @@ async fn lookup(
         .filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x')
         .map(|c| c.to_ascii_uppercase())
         .collect();
-    if !matches!(normalized_id.len(), 10 | 13)
-        || !normalized_id
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b == b'X')
-    {
+    if !is_valid_isbn(&normalized_id) {
         return error(StatusCode::NOT_FOUND, "Not found");
     }
     let result = tokio::time::timeout(
@@ -283,6 +279,58 @@ mod tests {
         serve(app).await
     }
 
+    async fn mock_kakao_fallback_error(fallback_status: u16) -> (String, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/",
+            get({
+                let calls = calls.clone();
+                move |Query(_q): Query<HashMap<String, String>>| {
+                    let calls = calls.clone();
+                    async move {
+                        let call = calls.fetch_add(1, Ordering::SeqCst);
+                        if call == 0 {
+                            return Json(
+                                serde_json::from_str::<serde_json::Value>(TITLE_SUCCESS).unwrap(),
+                            )
+                            .into_response();
+                        }
+                        let mut response = (
+                            StatusCode::from_u16(fallback_status).unwrap(),
+                            Json(json!({"error":"mock fallback failure"})),
+                        )
+                            .into_response();
+                        if fallback_status == 429 {
+                            response
+                                .headers_mut()
+                                .insert(header::RETRY_AFTER, HeaderValue::from_static("37"));
+                        }
+                        response
+                    }
+                }
+            }),
+        );
+        (serve(app).await, calls)
+    }
+
+    async fn test_provider_with_upstream(upstream: String) -> String {
+        let cfg = Arc::new(Config {
+            auth_token: None,
+            kakao_rest_api_key: "test-key".into(),
+            user_agent: "test-agent".into(),
+            requests_per_second: 0,
+            max_inflight_requests: 2,
+        });
+        let client = Arc::new(Client::with_base_url(
+            "test-key",
+            "test-agent",
+            &upstream,
+            0,
+            2,
+        ));
+        serve(routes(cfg, client)).await
+    }
+
     async fn serve(app: Router) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -350,6 +398,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_placeholder_isbn_uses_title_search() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let base = test_provider(Arc::new(AtomicU16::new(0)), calls.clone()).await;
+        let (status, body) =
+            get_json(&format!("{base}/search?isbn=0000000000&query=valid-title")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body["matches"].as_array().unwrap().is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn isbn_title_fallback_propagates_rate_limit_and_retry_after() {
+        let (upstream, calls) = mock_kakao_fallback_error(429).await;
+        let base = test_provider_with_upstream(upstream).await;
+        let response = reqwest::Client::new()
+            .get(format!(
+                "{base}/search?isbn=9780132350884&query=valid-title"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers().get(header::RETRY_AFTER).unwrap(), "37");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn isbn_title_fallback_maps_upstream_failure_to_bad_gateway() {
+        let (upstream, calls) = mock_kakao_fallback_error(503).await;
+        let base = test_provider_with_upstream(upstream).await;
+        let response = reqwest::Client::new()
+            .get(format!(
+                "{base}/search?isbn=9780132350884&query=valid-title"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn upstream_error_is_mapped_to_bad_gateway() {
         let calls = Arc::new(AtomicUsize::new(0));
         let base = test_provider(Arc::new(AtomicU16::new(500)), calls.clone()).await;
@@ -365,6 +455,11 @@ mod tests {
         let (status, body) = get_json(&format!("{base}/provider/info")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["key"], "kakao");
+        assert_eq!(body["mediaTypes"], json!(["book"]));
+        assert!(!body["supportedFields"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("language")));
         assert_eq!(body["rateLimit"]["minIntervalMs"], 500);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
