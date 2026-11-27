@@ -192,6 +192,23 @@
       ]
     },
     {
+      "key": "turkish-metadata",
+      "name": "BookOrbit Turkish Metadata Provider",
+      "summary": "Turkish books from Kitapyurdu: descriptions, covers, authors, publishers, publication dates, page counts and ISBNs. Early beta; include title and author with ISBN searches.",
+      "image": "ghcr.io/firatkupeli/bookorbit-turkish-metadata-provider",
+      "version": "0.1.2",
+      "port": 8080,
+      "docsUrl": "https://github.com/firatkupeli/bookorbit-turkish-metadata-provider",
+      "homepage": "https://www.kitapyurdu.com",
+      "color": "#00866a",
+      "mediaTypes": [
+        "book"
+      ],
+      "languages": [
+        "tr"
+      ]
+    },
+    {
       "key": "yandexbooks",
       "name": "Yandex Books",
       "summary": "Russian books, audiobooks and comics from Yandex Books: descriptions, publishers, series, genres, narrators and running times.",
